@@ -1,0 +1,217 @@
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap');
+
+@font-face {
+  font-family: 'BAUHS93';
+  src: url('https://static.wfonts.com/data/2014/12/29/bauhaus-93/BAUHS93.woff') format('woff');
+  font-display: swap;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply transition-all duration-300 ease-in-out;
+  }
+
+  html, body {
+    @apply antialiased;
+    font-family: 'Bebas Neue', sans-serif;
+  }
+
+  body {
+    background: #FFFFFF;
+    color: #003300;
+  }
+}
+
+@layer utilities {
+  .animate-zoomIn {
+    animation: zoomIn 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  }
+
+  .animate-zoomOut {
+    animation: zoomOut 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  }
+}
+
+@keyframes zoomIn {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes zoomOut {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+}
+
+@layer utilities {
+  .glass {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+
+  .glass-strong {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+  }
+
+  /* Gradientes */
+  .gradient-primary {
+    background: linear-gradient(135deg, #39FF14 0%, #66FF44 100%);
+  }
+
+  .gradient-neon {
+    background: linear-gradient(135deg, #39FF14 0%, #00AA00 50%, #003300 100%);
+  }
+
+  .gradient-bg {
+    background: linear-gradient(135deg, #FFFFFF 0%, #F9FAFB 50%, #66FF44 100%);
+  }
+
+  .text-gradient {
+    background: linear-gradient(135deg, #39FF14 0%, #00AA00 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Sombras Neon */
+  .glow-green {
+    box-shadow: 0 0 20px rgba(57, 255, 20, 0.4);
+  }
+
+  .glow-green-strong {
+    box-shadow: 0 0 30px rgba(57, 255, 20, 0.6);
+  }
+
+  .shadow-neon-green {
+    box-shadow: 0 0 20px rgba(57, 255, 20, 0.6);
+  }
+
+  /* Scrollbar personalizado */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  .scrollbar-green {
+    scrollbar-color: rgba(57, 255, 20, 0.5) transparent;
+    scrollbar-width: thin;
+  }
+
+  .scrollbar-green::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .scrollbar-green::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-green::-webkit-scrollbar-thumb {
+    background: rgba(57, 255, 20, 0.5);
+    border-radius: 4px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  .scrollbar-green::-webkit-scrollbar-thumb:hover {
+    background: rgba(57, 255, 20, 0.8);
+    background-clip: padding-box;
+  }
+
+  /* Scroll suave */
+  .smooth-scroll {
+    scroll-behavior: smooth;
+  }
+
+  /* Máscara de desvanecimiento */
+  .boletas-fade {
+    mask-image: linear-gradient(to bottom, transparent 0%, black 20%, black 80%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 20%, black 80%, transparent 100%);
+  }
+
+  /* Animaciones */
+  .animate-fadeIn {
+    animation: fadeIn 0.3s ease-in-out;
+  }
+
+  .animate-scaleIn {
+    animation: scaleIn 0.3s ease-in-out;
+  }
+
+  .animate-fadeInUp {
+    animation: fadeInUp 250ms ease-out forwards;
+  }
+
+  .animate-slideInRight {
+    animation: slideInRight 0.3s ease-out forwards;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes scaleIn {
+    from {
+      opacity: 0;
+      transform: scale(0.5);
+    }
+    50% {
+      transform: scale(1.1);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes slideInRight {
+    from {
+      opacity: 0;
+      transform: translateX(100%);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+}

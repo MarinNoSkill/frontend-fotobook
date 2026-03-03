@@ -1,0 +1,16 @@
+export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+
+export const API_ENDPOINTS = {
+  requestLogin: `${API_BASE_URL}/auth/request-login`,
+  verifyOtp: `${API_BASE_URL}/auth/verify-otp`,
+  validateToken: `${API_BASE_URL}/auth/validate-token`,
+  messages: `${API_BASE_URL}/messages`,
+  sendPDF: `${API_BASE_URL.replace('/api', '')}/api/send-pdf`
+};
+
+export const getAuthHeader = () => {
+  const token = localStorage.getItem('authToken');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
+
