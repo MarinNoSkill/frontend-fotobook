@@ -170,7 +170,7 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
               pageWidth,
               pageHeight,
               undefined,
-              'MEDIUM' // JPEG comprimido para reducir tamaño
+              'FAST' // Máxima compresión para emails
             );
           } catch (error) {
             console.error(`Error al agregar página ${i}:`, error);

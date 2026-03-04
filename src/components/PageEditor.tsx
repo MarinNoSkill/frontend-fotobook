@@ -646,7 +646,9 @@ export const PageEditor: React.FC<PageEditorProps> = ({
           y: 0,
           width: PAGE_WIDTH + BORDER_SIZE * 2,
           height: PAGE_HEIGHT + BORDER_SIZE * 2,
-          pixelRatio: 2,
+          pixelRatio: 1.5,  // Reducido para menor tamaño de archivo
+          mimeType: 'image/jpeg',  // JPEG para mejor compresión
+          quality: 0.85,  // Calidad 85% (balance calidad/tamaño)
         });
 
         // Restaurar zoom y posición
@@ -1134,13 +1136,15 @@ export const PageEditor: React.FC<PageEditorProps> = ({
         groups: layer.find('Group').length
       });
 
-      // Capturar con máxima calidad
+      // Capturar con calidad optimizada para PDF
       const dataUrl = stage.toDataURL({
         x: 0,
         y: 0,
         width: PAGE_WIDTH + BORDER_SIZE * 2,
         height: PAGE_HEIGHT + BORDER_SIZE * 2,
-        pixelRatio: 2,
+        pixelRatio: 1.5,  // Reducido para menor tamaño de archivo
+        mimeType: 'image/jpeg',  // JPEG para mejor compresión
+        quality: 0.85,  // Calidad 85% (balance calidad/tamaño)
       });
 
       console.log('📸 Preview capturada:', {
