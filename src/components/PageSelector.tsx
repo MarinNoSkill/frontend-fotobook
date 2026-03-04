@@ -32,6 +32,7 @@ interface UserData {
   cedula: string;
   celular: string;
   email: string;
+  direccion?: string; // Opcional hasta que se complete
   otpVerified: boolean;
 }
 
@@ -71,7 +72,6 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
     const loadCachedPages = async () => {
       if (!isReady) return;
 
-      console.log('🔄 Recargando páginas del caché...');
       const cached = new Map();
       for (const page of pages) {
         // Siempre cargar primero desde IndexedDB (tiene la preview más reciente)
@@ -79,13 +79,6 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
         
         if (data) {
           cached.set(page.id, data);
-          console.log(`📄 Página ${page.id} cargada:`, {
-            hasPreview: !!data.previewImage,
-            previewLength: data.previewImage?.length || 0,
-            photos: data.photos?.length || 0,
-            texts: data.texts?.length || 0,
-            stickers: data.stickers?.length || 0
-          });
         } else {
           // Si no está en IndexedDB, verificar editedPages
           const editedData = editedPages.get(page.id);
@@ -95,7 +88,6 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
         }
       }
       setCachedPages(cached);
-      console.log('✅ Caché recargado completo');
     };
 
     loadCachedPages();
@@ -114,7 +106,6 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
 
   const handlePhotoCountSelect = (count: number, layoutId: string) => {
     if (selectedPageId) {
-      console.log('📄 PageSelector: Enviando a App', { pageId: selectedPageId, count, layoutId });
       onSelectPage(selectedPageId, count, layoutId);
     }
   };
@@ -132,19 +123,18 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
 
   // Generar y descargar PDF con las 6 páginas
   const handleGeneratePDF = async (
-    userEmail: string, 
+    userData: {cedula: string, celular: string, direccion: string}, 
     onProgress: (step: string, progress: number) => void
   ) => {
     try {
       onProgress('preparing', 10);
-      console.log('📄 Generando PDF...');
 
-      // Crear PDF con tamaño personalizado (22cm x 30.2cm) - MÁXIMA CALIDAD
+      // Crear PDF optimizado (22cm x 30.2cm) - CALIDAD BALANCEADA
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
         format: [220, 302],
-        compress: false // Sin compresión para máxima calidad
+        compress: true // Activar compresión para reducir tamaño
       });
 
       // Dimensiones personalizadas en mm (22cm x 30.2cm)
@@ -163,18 +153,20 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
 
           // Agregar imagen directamente sin comprimir
           try {
+            // Optimizar imagen antes de agregarla al PDF
+            const optimizedImage = await optimizeImageForPDF(cachedPage.previewImage);
             pdf.addImage(
-              cachedPage.previewImage,
-              'PNG',
+              optimizedImage,
+              'JPEG', // Usar JPEG para mejor compresión
               0,
               0,
               pageWidth,
               pageHeight,
               undefined,
-              'NONE' // Sin compresión
+              'FAST' // Compresión rápida pero efectiva
             );
           } catch (error) {
-            console.error(`Error al agregar página ${i}:`, error);
+            // Error silencioso
           }
         }
         
@@ -186,54 +178,79 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
       const pdfBlob = pdf.output('blob');
       const fileName = `Fotobook_${userData.cedula}_${new Date().getTime()}.pdf`;
 
-      onProgress('preparing', 30);
-      console.log('✅ PDF preparado correctamente');
+      onProgress('preparing', 40);
 
-      // PASO 1: Enviar a administrador PRIMERO (prioridad)
-      onProgress('admin-email', 35);
+      // Solo enviar a administrador en segundo plano (invisible para usuario)
+      onProgress('admin-email', 50);
       try {
-        await sendPDFByEmail(pdfBlob, 'camilogame2018@hotmail.com', userData, fileName, true);
-        console.log('✅ PDF enviado al administrador');
-        onProgress('admin-email', 55);
+        await sendPDFByEmail(pdfBlob, userData, fileName);
+        onProgress('admin-email', 70);
       } catch (adminError) {
-        console.error('❌ Error al enviar PDF al administrador:', adminError);
-        throw new Error('No se pudo enviar el correo administrativo');
+        // No bloquear descarga si falla envío admin
       }
 
-      // PASO 2: Enviar al usuario
-      onProgress('user-email', 60);
-      try {
-        await sendPDFByEmail(pdfBlob, userEmail, userData, fileName, false);
-        console.log('✅ PDF enviado al usuario');
-        onProgress('user-email', 85);
-      } catch (userError) {
-        console.error('❌ Error al enviar PDF al usuario:', userError);
-        throw new Error('No se pudo enviar el correo al usuario');
-      }
-
-      // PASO 3: Descargar el PDF (solo después de enviar correos exitosamente)
-      onProgress('downloading', 90);
-      await new Promise(resolve => setTimeout(resolve, 500)); // Pequeña pausa visual
+      // Descargar PDF localmente (acción principal)
+      onProgress('downloading', 80);
+      await new Promise(resolve => setTimeout(resolve, 300)); // Pausa visual más corta
       
       pdf.save(fileName);
-      console.log('✅ PDF descargado correctamente');
       onProgress('downloading', 100);
 
-      console.log('✅ Proceso completado exitosamente');
     } catch (error) {
-      console.error('❌ Error al generar PDF:', error);
       throw error;
     }
   };
 
-  // Enviar PDF por correo
+  // Optimizar imagen para PDF (reducir tamaño manteniendo calidad)
+  const optimizeImageForPDF = async (imageDataUrl: string): Promise<string> => {
+    return new Promise((resolve) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d')!;
+      const img = new Image();
+      
+      img.onload = () => {
+        // Mantener resolución alta pero optimizar compresión
+        const maxWidth = 1654; // ~220mm a 190 DPI
+        const maxHeight = 2268; // ~302mm a 190 DPI
+        
+        let { width, height } = img;
+        
+        // Escalar solo si es necesario (mantener calidad visual)
+        if (width > maxWidth || height > maxHeight) {
+          const ratio = Math.min(maxWidth / width, maxHeight / height);
+          width *= ratio;
+          height *= ratio;
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        
+        // Mejorar calidad de renderizado
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        // Comprimir a JPEG con 85% calidad (balance perfecto tamaño/calidad)
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      };
+      
+      img.src = imageDataUrl;
+    });
+  };
+
+  // Enviar PDF por correo (solo administrador en segundo plano)
   const sendPDFByEmail = async (
     pdfBlob: Blob, 
-    emailTo: string, 
-    userData: UserData, 
-    fileName: string,
-    isAdmin: boolean
+    userData: {cedula: string, celular: string, direccion: string}, 
+    fileName: string
   ) => {
+    // Validar tamaño del PDF (máximo 200MB - Pixeldrain soporta hasta 5GB)
+    const pdfSizeMB = pdfBlob.size / (1024 * 1024);
+    if (pdfSizeMB > 200) {
+      throw new Error(`El PDF es demasiado grande (${pdfSizeMB.toFixed(2)}MB). Máximo permitido: 200MB`);
+    }
+
     // Convertir blob a base64
     const reader = new FileReader();
     const base64Promise = new Promise<string>((resolve, reject) => {
@@ -247,31 +264,43 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
 
     const base64PDF = await base64Promise;
 
-    // Enviar al backend (solo al destinatario especificado)
-    const response = await fetch(API_ENDPOINTS.sendPDF, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        emailTo: emailTo,
-        pdfBase64: base64PDF,
-        fileName: fileName,
-        isAdmin: isAdmin,
-        userData: {
-          cedula: userData.cedula,
-          celular: userData.celular,
-          email: userData.email
-        }
-      }),
-    });
+    // Enviar al backend con timeout de 5 minutos para archivos muy grandes
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 300000); // 5 minutos
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.message || `Error al enviar el correo a ${emailTo}`);
+    try {
+      const response = await fetch(API_ENDPOINTS.sendPDF, {
+        signal: controller.signal,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          pdfBase64: base64PDF,
+          fileName: fileName,
+          userData: {
+            cedula: userData.cedula,
+            celular: userData.celular,
+            email: 'admin@fotobook.com', // Email dummy para admin
+            direccion: userData.direccion
+          }
+        }),
+      });
+
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `Error al procesar el fotobook`);
+      }
+
+    } catch (error: any) {
+      clearTimeout(timeout);
+      if (error.name === 'AbortError') {
+        throw new Error('Tiempo de espera agotado. El archivo es muy grande o la conexión es lenta. Inténtalo de nuevo.');
+      }
+      throw error;
     }
-
-    console.log(`📧 Correo enviado correctamente a ${emailTo}`);
   };
 
   return (
@@ -322,9 +351,13 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
                 <p className="text-[0.7rem] font-bebas text-[#6B7280]">CELULAR</p>
                 <p className="text-sm font-bebas text-[#003300]">{userData.celular}</p>
               </div>
-              <div className="mb-4">
+              <div className="mb-3">
                 <p className="text-[0.7rem] font-bebas text-[#6B7280]">EMAIL</p>
                 <p className="text-sm font-bebas text-[#003300] break-all">{userData.email}</p>
+              </div>
+              <div className="mb-4">
+                <p className="text-[0.7rem] font-bebas text-[#6B7280]">DIRECCIÓN</p>
+                <p className="text-sm font-bebas text-[#003300]">{userData.direccion || 'No especificada'}</p>
               </div>
               <button
                 onClick={onLogout}

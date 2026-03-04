@@ -21,11 +21,6 @@ export const PhotoCountSelector: React.FC<PhotoCountSelectorProps> = ({ onSelect
     setSelectedCount(count);
     const borderWidth = getBorderWidth(count);
     const layouts = getLayoutsForCount(count, borderWidth);
-    console.log('📸 PhotoCountSelector: Layouts disponibles', { 
-      count, 
-      borderWidth, 
-      layouts: layouts.map(l => ({ id: l.id, name: l.name })) 
-    });
     if (layouts.length === 1) {
       // Si solo hay un layout, seleccionarlo automáticamente
       onSelect(count, layouts[0].id);

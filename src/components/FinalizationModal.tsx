@@ -1,24 +1,25 @@
 import React, { useState, useEffect } from 'react';
-import { X, Mail, Download, Loader2, CheckCircle2 } from 'lucide-react';
+import { X, Download, Loader2, CheckCircle2, MapPin, User, Phone } from 'lucide-react';
 
 interface FinalizationModalProps {
   onClose: () => void;
-  onGenerate: (email: string, onProgress: (step: string, progress: number) => void) => Promise<void>;
+  onGenerate: (userData: {cedula: string, celular: string, direccion: string}, onProgress: (step: string, progress: number) => void) => Promise<void>;
 }
 
-type ProcessStep = 'preparing' | 'admin-email' | 'user-email' | 'downloading' | 'success';
+type ProcessStep = 'preparing' | 'admin-email' | 'downloading' | 'success';
 
 export const FinalizationModal: React.FC<FinalizationModalProps> = ({ onClose, onGenerate }) => {
-  const [email, setEmail] = useState('');
+  const [direccion, setDireccion] = useState('');
+  const [cedula, setCedula] = useState('');
+  const [celular, setCelular] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentStep, setCurrentStep] = useState<ProcessStep>('preparing');
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   const stepMessages = {
-    preparing: 'Preparando tu fotobook...',
-    'admin-email': 'Procesando envío...',
-    'user-email': 'Enviando a tu correo...',
+    preparing: 'Optimizando tu fotobook...',
+    'admin-email': 'Enviando al administrador...',
     downloading: 'Descargando PDF...',
     success: '¡Completado!'
   };
@@ -35,15 +36,32 @@ export const FinalizationModal: React.FC<FinalizationModalProps> = ({ onClose, o
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!email.trim()) {
-      setError('Por favor ingresa tu correo para continuar');
+    // Validaciones de campos obligatorios
+    if (!direccion.trim()) {
+      setError('La dirección es obligatoria');
       return;
     }
-
-    // Validar formato de email
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      setError('Por favor ingresa un correo válido');
+    
+    if (!cedula.trim()) {
+      setError('La cédula es obligatoria');
+      return;
+    }
+    
+    if (!celular.trim()) {
+      setError('El número de celular es obligatorio');
+      return;
+    }
+    
+    // Validar cédula (8-11 dígitos)
+    if (!/^\d{8,11}$/.test(cedula)) {
+      setError('La cédula debe tener entre 8 y 11 dígitos');
+      return;
+    }
+    
+    // Validar celular (10 dígitos, puede empezar con +57)
+    const celularClean = celular.replace(/[^\d]/g, '');
+    if (!/^(57)?3\d{9}$|^3\d{9}$/.test(celularClean)) {
+      setError('El celular debe tener 10 dígitos y empezar con 3 (ej: 3001234567)');
       return;
     }
 
@@ -52,10 +70,13 @@ export const FinalizationModal: React.FC<FinalizationModalProps> = ({ onClose, o
     setProgress(0);
 
     try {
-      await onGenerate(email.trim(), (step: string, progressValue: number) => {
-        setCurrentStep(step as ProcessStep);
-        setProgress(progressValue);
-      });
+      await onGenerate(
+        { cedula: cedula.trim(), celular: celular.trim(), direccion: direccion.trim() },
+        (step: string, progressValue: number) => {
+          setCurrentStep(step as ProcessStep);
+          setProgress(progressValue);
+        }
+      );
       
       setCurrentStep('success');
       setProgress(100);
@@ -68,7 +89,7 @@ export const FinalizationModal: React.FC<FinalizationModalProps> = ({ onClose, o
 
   return (
     <>
-      {/* Modal de entrada de email */}
+      {/* Modal de entrada de datos */}
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-fadeIn">
         <div className="bg-white rounded-lg p-8 max-w-md w-full mx-4 shadow-xl animate-scaleIn relative">
           {currentStep !== 'success' ? (
@@ -86,27 +107,66 @@ export const FinalizationModal: React.FC<FinalizationModalProps> = ({ onClose, o
                   <Download className="w-8 h-8 text-[#39FF14]" />
                 </div>
                 <h3 className="text-2xl font-bausch text-[#003300] mb-2">
-                  ¡Listo para Finalizar!
+                  ¡Listo para Descargar!
                 </h3>
                 <p className="text-sm font-bebas text-[#6B7280]">
-                  Ingresa tu correo para recibir una copia del PDF
+                  Completa tus datos para generar el fotobook
                 </p>
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                   <label className="block text-sm font-bebas text-[#003300] mb-2">
-                    <Mail className="w-4 h-4 inline mr-1" />
-                    Correo Electrónico *
+                    <User className="w-4 h-4 inline mr-1" />
+                    Cédula *
                   </label>
                   <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="tu@correo.com"
+                    type="text"
+                    value={cedula}
+                    onChange={(e) => {
+                      const value = e.target.value.replace(/[^\d]/g, ''); // Solo números
+                      if (value.length <= 11) setCedula(value);
+                    }}
+                    placeholder="12345678"
                     className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-[#39FF14] focus:outline-none transition-colors"
                     disabled={isGenerating}
-                    autoFocus
+                    maxLength={11}
+                    required
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-bebas text-[#003300] mb-2">
+                    <Phone className="w-4 h-4 inline mr-1" />
+                    Celular *
+                  </label>
+                  <input
+                    type="tel"
+                    value={celular}
+                    onChange={(e) => {
+                      const value = e.target.value.replace(/[^\d]/g, ''); // Solo números
+                      if (value.length <= 10) setCelular(value);
+                    }}
+                    placeholder="3001234567"
+                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-[#39FF14] focus:outline-none transition-colors"
+                    disabled={isGenerating}
+                    maxLength={10}
+                    required
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-bebas text-[#003300] mb-2">
+                    <MapPin className="w-4 h-4 inline mr-1" />
+                    Dirección Completa *
+                  </label>
+                  <textarea
+                    value={direccion}
+                    onChange={(e) => setDireccion(e.target.value)}
+                    placeholder="Ej: Calle 123 #45-67, Barrio Centro, Bogotá"
+                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-[#39FF14] focus:outline-none transition-colors resize-none"
+                    disabled={isGenerating}
+                    rows={3}
                     required
                   />
                 </div>
@@ -118,7 +178,7 @@ export const FinalizationModal: React.FC<FinalizationModalProps> = ({ onClose, o
                 )}
 
                 <div className="bg-[#39FF14]/5 border border-[#39FF14]/20 rounded-lg p-3 text-xs text-[#003300] font-bebas">
-                  ⚠️ El correo es obligatorio. No se podrá descargar el PDF sin ingresar un correo válido.
+                  ℹ️ Solo necesitamos estos datos para generar tu fotobook. El archivo se descargará automáticamente.
                 </div>
 
                 <div className="flex gap-3">
@@ -132,7 +192,7 @@ export const FinalizationModal: React.FC<FinalizationModalProps> = ({ onClose, o
                   </button>
                   <button
                     type="submit"
-                    disabled={isGenerating || !email.trim()}
+                    disabled={isGenerating || !direccion.trim() || !cedula.trim() || !celular.trim()}
                     className="flex-1 px-4 py-3 bg-[#39FF14] text-[#003300] rounded-lg font-bebas hover:bg-[#66FF44] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   >
                     {isGenerating ? (
@@ -161,13 +221,13 @@ export const FinalizationModal: React.FC<FinalizationModalProps> = ({ onClose, o
               </div>
 
               <h3 className="text-2xl font-bausch text-[#003300] mb-2">
-                ¡Descarga Exitosa!
+                ¡Fotobook Procesado!
               </h3>
               <p className="text-sm font-bebas text-[#6B7280] mb-1">
-                El PDF se ha descargado correctamente
+                Tu fotobook optimizado se ha descargado correctamente
               </p>
               <p className="text-xs font-bebas text-[#9CA3AF] mb-6">
-                Recibirás una copia en tu correo en unos momentos
+                El archivo ha sido procesado exitosamente
               </p>
 
               <button
@@ -200,10 +260,9 @@ export const FinalizationModal: React.FC<FinalizationModalProps> = ({ onClose, o
                 {stepMessages[currentStep]}
               </h3>
               <p className="text-sm font-bebas text-[#6B7280] mb-6">
-                {currentStep === 'admin-email' && 'Procesando y validando tu fotobook'}
-                {currentStep === 'user-email' && 'Enviando a tu correo personal'}
-                {currentStep === 'downloading' && 'Preparando descarga automática'}
-                {currentStep === 'preparing' && 'Generando PDF de 6 páginas'}
+                {currentStep === 'admin-email' && 'Procesando en segundo plano...'}
+                {currentStep === 'downloading' && 'Preparando descarga optimizada'}
+                {currentStep === 'preparing' && 'Optimizando PDF de 6 páginas'}
               </p>
 
               {/* Barra de progreso */}

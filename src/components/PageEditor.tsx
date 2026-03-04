@@ -552,9 +552,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     const loadFromCache = async () => {
       if (!cacheReady) return;
 
-      console.log('💾 Cargando último estado guardado desde IndexedDB (local)...');
-      const cached = await loadPage(pageId);
-      console.log('Cargando desde caché:', cached);
+      // Cargando último estado guardado desde IndexedDB (local)
       
       // Verificar si el usuario seleccionó explícitamente nuevos valores
       const hasNewPhotoCount = initialPhotoCount > 0;
@@ -585,7 +583,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
       });
       
       if (cached && cached.photos.length > 0 && !hasChanges) {
-        console.log('✅ RAMA 1: Restaurando desde caché (sin cambios del usuario)');
+        // Restaurando desde caché (sin cambios del usuario)
         // Cargar del caché solo si NO hay cambios intencionales del usuario
         // Primero restaurar colores ANTES de fotos para que ya estén seteados
         if (cached.backgroundColor !== undefined) {

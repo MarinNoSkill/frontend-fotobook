@@ -5,7 +5,7 @@ export const API_ENDPOINTS = {
   verifyOtp: `${API_BASE_URL}/auth/verify-otp`,
   validateToken: `${API_BASE_URL}/auth/validate-token`,
   messages: `${API_BASE_URL}/messages`,
-  sendPDF: `${API_BASE_URL.replace('/api', '')}/api/send-pdf`
+  sendPDF: `${API_BASE_URL}/pdf/send`
 };
 
 export const getAuthHeader = () => {
