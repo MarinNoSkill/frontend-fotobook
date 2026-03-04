@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { ArrowLeft, Trash2, Copy, RotateCw, Type, Smile } from 'lucide-react';
+import { ArrowLeft, Trash2, Copy, RotateCw, Type, Smile, ArrowUp, ArrowDown } from 'lucide-react';
 import { Stage, Layer, Image as KonvaImage, Rect, Transformer, Group, Text as KonvaText } from 'react-konva';
 import Konva from 'konva';
 import { usePageCache } from '../hooks/usePageCache';
@@ -118,8 +118,8 @@ const PhotoImage: React.FC<{
           node.scaleY(1);
 
           onChange({
-            x: Math.max(0, node.x()),
-            y: Math.max(0, node.y()),
+            x: node.x(),
+            y: node.y(),
             width: Math.max(5, node.width() * scaleX),
             height: Math.max(5, node.height() * scaleY),
             rotation: node.rotation(),
@@ -493,8 +493,8 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   const [clipboard, setClipboard] = useState<Photo | null>(null);
   const [showResetModal, setShowResetModal] = useState(false);
   const [showExitModal, setShowExitModal] = useState(false);
-  const [backgroundColor, setBackgroundColor] = useState('#D4AF37'); // Marco exterior (lo que el usuario ve como "Borde")
-  const [borderColor, setBorderColor] = useState('#1A3A52'); // Compartimentos de fotos (lo que el usuario ve como "Fondo")
+  const [backgroundColor, setBackgroundColor] = useState('#D4AF37'); // Marco exterior y fondo del canvas
+  const [borderColor, setBorderColor] = useState('#1A3A52'); // BORDES: Marcos/compartimentos entre fotos (donde van las fotos)
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -646,9 +646,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
           y: 0,
           width: PAGE_WIDTH + BORDER_SIZE * 2,
           height: PAGE_HEIGHT + BORDER_SIZE * 2,
-          pixelRatio: 2.0,  // Alta resolución (1663x2283px ~ 2K)
-          mimeType: 'image/jpeg',
-          quality: 0.88,  // 88% - excelente calidad visual
+          pixelRatio: 2,
         });
 
         // Restaurar zoom y posición
@@ -1042,6 +1040,75 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     }
   };
 
+  // Funciones para controlar el orden de capas (z-index)
+  const handleBringToFront = () => {
+    if (!selectedId) return;
+    
+    const isPhoto = photos.some((p) => p.id === selectedId);
+    const isText = texts.some((t) => t.id === selectedId);
+    const isSticker = stickers.some((s) => s.id === selectedId);
+    
+    if (isPhoto) {
+      setPhotos((prev) => {
+        const maxZIndex = Math.max(...prev.map(p => p.zIndex), 0);
+        return prev.map((p) => 
+          p.id === selectedId ? { ...p, zIndex: maxZIndex + 1 } : p
+        );
+      });
+      setHasUnsavedChanges(true);
+    } else if (isText) {
+      setTexts((prev) => {
+        const maxZIndex = Math.max(...prev.map(t => t.zIndex), 0);
+        return prev.map((t) => 
+          t.id === selectedId ? { ...t, zIndex: maxZIndex + 1 } : t
+        );
+      });
+      setHasUnsavedChanges(true);
+    } else if (isSticker) {
+      setStickers((prev) => {
+        const maxZIndex = Math.max(...prev.map(s => s.zIndex), 0);
+        return prev.map((s) => 
+          s.id === selectedId ? { ...s, zIndex: maxZIndex + 1 } : s
+        );
+      });
+      setHasUnsavedChanges(true);
+    }
+  };
+
+  const handleSendToBack = () => {
+    if (!selectedId) return;
+    
+    const isPhoto = photos.some((p) => p.id === selectedId);
+    const isText = texts.some((t) => t.id === selectedId);
+    const isSticker = stickers.some((s) => s.id === selectedId);
+    
+    if (isPhoto) {
+      setPhotos((prev) => {
+        const minZIndex = Math.min(...prev.map(p => p.zIndex), 0);
+        return prev.map((p) => 
+          p.id === selectedId ? { ...p, zIndex: minZIndex - 1 } : p
+        );
+      });
+      setHasUnsavedChanges(true);
+    } else if (isText) {
+      setTexts((prev) => {
+        const minZIndex = Math.min(...prev.map(t => t.zIndex), 0);
+        return prev.map((t) => 
+          t.id === selectedId ? { ...t, zIndex: minZIndex - 1 } : t
+        );
+      });
+      setHasUnsavedChanges(true);
+    } else if (isSticker) {
+      setStickers((prev) => {
+        const minZIndex = Math.min(...prev.map(s => s.zIndex), 0);
+        return prev.map((s) => 
+          s.id === selectedId ? { ...s, zIndex: minZIndex - 1 } : s
+        );
+      });
+      setHasUnsavedChanges(true);
+    }
+  };
+
   const handleUndo = () => {
     if (history.length <= 1) return;
     const nextHistory = history.slice(0, -1);
@@ -1136,15 +1203,13 @@ export const PageEditor: React.FC<PageEditorProps> = ({
         groups: layer.find('Group').length
       });
 
-      // Capturar con calidad optimizada para PDF
+      // Capturar con máxima calidad
       const dataUrl = stage.toDataURL({
         x: 0,
         y: 0,
         width: PAGE_WIDTH + BORDER_SIZE * 2,
         height: PAGE_HEIGHT + BORDER_SIZE * 2,
-        pixelRatio: 2.0,  // Alta resolución (1663x2283px ~ 2K)
-        mimeType: 'image/jpeg',
-        quality: 0.88,  // 88% - excelente calidad visual
+        pixelRatio: 2,
       });
 
       console.log('📸 Preview capturada:', {
@@ -1399,9 +1464,13 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   };
 
   const handleStageMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
-    // Si hace click en el canvas (no en una foto), mostrar cursor de movimiento
-    if (e.target === e.target.getStage()) {
-      e.target.getStage()!.container().style.cursor = 'grab';
+    // Si hace click en el canvas (no en una foto, texto o sticker), deseleccionar
+    const clickedOnEmpty = e.target === e.target.getStage() || e.target.name() === 'background';
+    if (clickedOnEmpty) {
+      setSelectedId(null);
+      if (e.target.getStage()) {
+        e.target.getStage()!.container().style.cursor = 'grab';
+      }
     }
   };
 
@@ -1490,48 +1559,17 @@ export const PageEditor: React.FC<PageEditorProps> = ({
             scaleY={zoom}
           >
             <Layer ref={layerRef}>
-              {/* Marco exterior - El usuario lo ve como BORDE */}
+              {/* FONDO AZUL completo */}
               <Rect
+                name="background"
                 x={0}
                 y={0}
                 width={PAGE_WIDTH + BORDER_SIZE * 2}
                 height={PAGE_HEIGHT + BORDER_SIZE * 2}
-                fill={backgroundColor}
-                listening={false}
+                fill={borderColor}
               />
 
-              {/* Área del canvas - Marco exterior y espacios entre fotos */}
-              <Rect
-                x={BORDER_SIZE}
-                y={BORDER_SIZE}
-                width={PAGE_WIDTH}
-                height={PAGE_HEIGHT}
-                fill={backgroundColor}
-                onClick={() => setSelectedId(null)}
-              />
-
-              {/* Compartimentos de fotos - El usuario lo ve como FONDO */}
-              {layoutPositions.length > 0 && (
-                <Group
-                  x={BORDER_SIZE}
-                  y={BORDER_SIZE}
-                  listening={false}
-                >
-                  {layoutPositions.map((pos, idx) => (
-                    <Rect
-                      key={`layout-${idx}`}
-                      x={pos.x}
-                      y={pos.y}
-                      width={pos.width}
-                      height={pos.height}
-                      fill={borderColor}
-                      listening={false}
-                    />
-                  ))}
-                </Group>
-              )}
-
-              {/* Grupo para las fotos (con clipping para que no salgan del área de trabajo) */}
+              {/* FOTOS encima del fondo azul */}
               <Group
                 x={BORDER_SIZE}
                 y={BORDER_SIZE}
@@ -1567,6 +1605,73 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                       }}
                     />
                   ))}
+              </Group>
+
+              {/* LÍNEAS DORADAS que dividen según layout */}
+              {layoutPositions.length > 1 && (
+                <Group x={BORDER_SIZE} y={BORDER_SIZE} listening={false}>
+                  {(() => {
+                    // Calcular líneas divisorias únicas
+                    const verticalLines = new Set<number>();
+                    const horizontalLines = new Set<number>();
+                    
+                    layoutPositions.forEach((pos) => {
+                      // Líneas verticales (borde derecho de cada compartimento excepto el último)
+                      const rightEdge = pos.x + pos.width;
+                      if (rightEdge < PAGE_WIDTH - 1) {
+                        verticalLines.add(rightEdge);
+                      }
+                      
+                      // Líneas horizontales (borde inferior de cada compartimento excepto el último)
+                      const bottomEdge = pos.y + pos.height;
+                      if (bottomEdge < PAGE_HEIGHT - 1) {
+                        horizontalLines.add(bottomEdge);
+                      }
+                    });
+                    
+                    return (
+                      <>
+                        {/* Líneas verticales - extendidas hasta los bordes */}
+                        {Array.from(verticalLines).map((x, idx) => (
+                          <Rect
+                            key={`vline-${idx}`}
+                            x={x}
+                            y={-BORDER_SIZE}
+                            width={BORDER_SIZE}
+                            height={PAGE_HEIGHT + BORDER_SIZE * 2}
+                            fill={backgroundColor}
+                            listening={false}
+                          />
+                        ))}
+                        
+                        {/* Líneas horizontales - extendidas hasta los bordes */}
+                        {Array.from(horizontalLines).map((y, idx) => (
+                          <Rect
+                            key={`hline-${idx}`}
+                            x={-BORDER_SIZE}
+                            y={y}
+                            width={PAGE_WIDTH + BORDER_SIZE * 2}
+                            height={BORDER_SIZE}
+                            fill={backgroundColor}
+                            listening={false}
+                          />
+                        ))}
+                      </>
+                    );
+                  })()}
+                </Group>
+              )}
+
+              {/* Marco exterior dorado */}
+              <Group listening={false}>
+                {/* Borde superior */}
+                <Rect x={0} y={0} width={PAGE_WIDTH + BORDER_SIZE * 2} height={BORDER_SIZE} fill={backgroundColor} />
+                {/* Borde inferior */}
+                <Rect x={0} y={BORDER_SIZE + PAGE_HEIGHT} width={PAGE_WIDTH + BORDER_SIZE * 2} height={BORDER_SIZE} fill={backgroundColor} />
+                {/* Borde izquierdo */}
+                <Rect x={0} y={0} width={BORDER_SIZE} height={PAGE_HEIGHT + BORDER_SIZE * 2} fill={backgroundColor} />
+                {/* Borde derecho */}
+                <Rect x={BORDER_SIZE + PAGE_WIDTH} y={0} width={BORDER_SIZE} height={PAGE_HEIGHT + BORDER_SIZE * 2} fill={backgroundColor} />
               </Group>
               
               {/* Textos (sin clipping, pueden estar en todo el lienzo) */}
@@ -1652,7 +1757,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-bebas text-gray-600 mb-1">
-                  Color de Fondo
+                  Color de Bordes (Marcos entre fotos)
                 </label>
                 <input
                   type="color"
@@ -1666,7 +1771,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
               </div>
               <div>
                 <label className="block text-xs font-bebas text-gray-600 mb-1">
-                  Color de Bordes
+                  Color de Fondo (Marco exterior)
                 </label>
                 <input
                   type="color"
@@ -1752,6 +1857,31 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                   className="px-2 py-1 bg-[#39FF14] text-[#003300] rounded font-bebas hover:bg-[#66FF44] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                 >
                   →
+                </button>
+              </div>
+            </div>
+            
+            {/* Control de Capas (Z-Index) */}
+            <div className="flex flex-col gap-1 mt-4">
+              <label className="text-xs font-bebas text-[#003300] mb-1">
+                Orden de Capas
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={handleBringToFront}
+                  disabled={!selectedId}
+                  className="flex items-center justify-center gap-1 px-3 py-2 bg-[#39FF14] text-[#003300] rounded font-bebas hover:bg-[#66FF44] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                >
+                  <ArrowUp className="w-4 h-4" />
+                  Al Frente
+                </button>
+                <button
+                  onClick={handleSendToBack}
+                  disabled={!selectedId}
+                  className="flex items-center justify-center gap-1 px-3 py-2 bg-[#39FF14] text-[#003300] rounded font-bebas hover:bg-[#66FF44] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                >
+                  <ArrowDown className="w-4 h-4" />
+                  Al Fondo
                 </button>
               </div>
             </div>
