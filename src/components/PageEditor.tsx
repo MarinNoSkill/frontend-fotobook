@@ -646,9 +646,9 @@ export const PageEditor: React.FC<PageEditorProps> = ({
           y: 0,
           width: PAGE_WIDTH + BORDER_SIZE * 2,
           height: PAGE_HEIGHT + BORDER_SIZE * 2,
-          pixelRatio: 1.0,  // Resolución estándar (suficiente calidad)
+          pixelRatio: 2.0,  // Alta resolución (1663x2283px ~ 2K)
           mimeType: 'image/jpeg',
-          quality: 0.82,  // 82% - buen balance peso/calidad
+          quality: 0.88,  // 88% - excelente calidad visual
         });
 
         // Restaurar zoom y posición
@@ -1142,9 +1142,9 @@ export const PageEditor: React.FC<PageEditorProps> = ({
         y: 0,
         width: PAGE_WIDTH + BORDER_SIZE * 2,
         height: PAGE_HEIGHT + BORDER_SIZE * 2,
-        pixelRatio: 1.0,  // Resolución estándar (suficiente calidad)
+        pixelRatio: 2.0,  // Alta resolución (1663x2283px ~ 2K)
         mimeType: 'image/jpeg',
-        quality: 0.82,  // 82% - buen balance peso/calidad
+        quality: 0.88,  // 88% - excelente calidad visual
       });
 
       console.log('📸 Preview capturada:', {

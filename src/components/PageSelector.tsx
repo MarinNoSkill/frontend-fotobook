@@ -159,16 +159,18 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             
-            // Dimensiones optimizadas (831x1141 = 22cm x 30.2cm a 96 DPI)
-            canvas.width = 831;
-            canvas.height = 1141;
+            // Dimensiones optimizadas - 2K (1663x2283 = 22cm x 30.2cm a 192 DPI)
+            canvas.width = 1663;
+            canvas.height = 2283;
             
             if (ctx) {
-              // Dibujar imagen re-escalada
+              // Dibujar imagen re-escalada con alta calidad
+              ctx.imageSmoothingEnabled = true;
+              ctx.imageSmoothingQuality = 'high';
               ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
               
-              // Exportar con compresión JPEG optimizada
-              const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.82);
+              // Exportar con alta calidad JPEG (88% = excelente calidad)
+              const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.88);
               resolve(compressedDataUrl);
             } else {
               reject(new Error('No se pudo crear contexto del canvas'));
