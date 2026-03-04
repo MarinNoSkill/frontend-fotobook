@@ -150,6 +150,35 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
       const pageWidth = 220;
       const pageHeight = 302;
 
+      // Función para re-comprimir imagen antes de agregar al PDF
+      const compressImage = async (imageDataUrl: string): Promise<string> => {
+        return new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => {
+            // Crear canvas con dimensiones reducidas
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Dimensiones optimizadas (831x1141 = 22cm x 30.2cm a 96 DPI)
+            canvas.width = 831;
+            canvas.height = 1141;
+            
+            if (ctx) {
+              // Dibujar imagen re-escalada
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+              
+              // Exportar con compresión JPEG optimizada
+              const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.82);
+              resolve(compressedDataUrl);
+            } else {
+              reject(new Error('No se pudo crear contexto del canvas'));
+            }
+          };
+          img.onerror = () => reject(new Error('Error al cargar imagen'));
+          img.src = imageDataUrl;
+        });
+      };
+
       // Agregar cada página del fotobook al PDF
       for (let i = 1; i <= 6; i++) {
         const cachedPage = cachedPages.get(i);
@@ -160,17 +189,19 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
             pdf.addPage();
           }
 
-          // Agregar la imagen de preview al PDF
+          // Re-comprimir imagen antes de agregar al PDF
           try {
+            const compressedImage = await compressImage(cachedPage.previewImage);
+            
             pdf.addImage(
-              cachedPage.previewImage,
+              compressedImage,
               'JPEG',
               0,
               0,
               pageWidth,
               pageHeight,
               undefined,
-              'FAST' // Máxima compresión para emails
+              'FAST' // Máxima compresión
             );
           } catch (error) {
             console.error(`Error al agregar página ${i}:`, error);
