@@ -114,6 +114,7 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
 
   const handlePhotoCountSelect = (count: number, layoutId: string) => {
     if (selectedPageId) {
+      console.log('📄 PageSelector: Enviando a App', { pageId: selectedPageId, count, layoutId });
       onSelectPage(selectedPageId, count, layoutId);
     }
   };
@@ -138,50 +139,19 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
       onProgress('preparing', 10);
       console.log('📄 Generando PDF...');
 
-      // Crear PDF con tamaño personalizado (22cm x 30.2cm)
+      // Crear PDF con tamaño personalizado (22cm x 30.2cm) - MÁXIMA CALIDAD
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
         format: [220, 302],
-        compress: true // Activar compresión para reducir tamaño
+        compress: false // Sin compresión para máxima calidad
       });
 
       // Dimensiones personalizadas en mm (22cm x 30.2cm)
       const pageWidth = 220;
       const pageHeight = 302;
 
-      // Función para re-comprimir imagen antes de agregar al PDF
-      const compressImage = async (imageDataUrl: string): Promise<string> => {
-        return new Promise((resolve, reject) => {
-          const img = new Image();
-          img.onload = () => {
-            // Crear canvas con dimensiones reducidas
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            
-            // Dimensiones optimizadas - 2K (1663x2283 = 22cm x 30.2cm a 192 DPI)
-            canvas.width = 1663;
-            canvas.height = 2283;
-            
-            if (ctx) {
-              // Dibujar imagen re-escalada con alta calidad
-              ctx.imageSmoothingEnabled = true;
-              ctx.imageSmoothingQuality = 'high';
-              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-              
-              // Exportar con alta calidad JPEG (88% = excelente calidad)
-              const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.88);
-              resolve(compressedDataUrl);
-            } else {
-              reject(new Error('No se pudo crear contexto del canvas'));
-            }
-          };
-          img.onerror = () => reject(new Error('Error al cargar imagen'));
-          img.src = imageDataUrl;
-        });
-      };
-
-      // Agregar cada página del fotobook al PDF
+      // Agregar cada página del fotobook al PDF - MÁXIMA CALIDAD
       for (let i = 1; i <= 6; i++) {
         const cachedPage = cachedPages.get(i);
         
@@ -191,19 +161,17 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
             pdf.addPage();
           }
 
-          // Re-comprimir imagen antes de agregar al PDF
+          // Agregar imagen directamente sin comprimir
           try {
-            const compressedImage = await compressImage(cachedPage.previewImage);
-            
             pdf.addImage(
-              compressedImage,
-              'JPEG',
+              cachedPage.previewImage,
+              'PNG',
               0,
               0,
               pageWidth,
               pageHeight,
               undefined,
-              'FAST' // Máxima compresión
+              'NONE' // Sin compresión
             );
           } catch (error) {
             console.error(`Error al agregar página ${i}:`, error);

@@ -475,6 +475,11 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   initialPhotoCount = 0,
   layoutId: initialLayoutId = '',
 }) => {
+  console.log('🎨 PageEditor: Props recibidos', { 
+    pageId, 
+    initialPhotoCount, 
+    initialLayoutId 
+  });
   const stageRef = useRef<Konva.Stage>(null);
   const layerRef = useRef<Konva.Layer>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -484,6 +489,13 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   const [photos, setPhotos] = useState<Photo[]>(initialPhotos);
   const [photoCount, setPhotoCount] = useState(initialPhotoCount);
   const [layoutId, setLayoutId] = useState(initialLayoutId);
+  
+  console.log('🎨 PageEditor: Estados inicializados', { 
+    photoCount, 
+    layoutId,
+    initialPhotoCount,
+    initialLayoutId
+  });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
   const [stageSize, setStageSize] = useState({ width: 1000, height: 800 });
@@ -525,6 +537,14 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   const selectedLayout = photoCount > 0 && layoutId ? getLayoutById(layoutId, photoCount, BORDER_SIZE) : null;
   const layoutPositions = selectedLayout ? selectedLayout.positions : [];
 
+  console.log('📊 PageEditor: Layout calculado', {
+    photoCount,
+    layoutId,
+    BORDER_SIZE,
+    selectedLayout: selectedLayout ? selectedLayout.id + ' - ' + selectedLayout.name : 'null',
+    layoutPositionsCount: layoutPositions.length
+  });
+
   // Cargar datos del caché cuando el componente se monta
   // IndexedDB es LOCAL en el navegador, así que si se cae el wifi,
   // siempre carga el último estado guardado (no se pierde nada)
@@ -536,7 +556,37 @@ export const PageEditor: React.FC<PageEditorProps> = ({
       const cached = await loadPage(pageId);
       console.log('Cargando desde caché:', cached);
       
-      if (cached && cached.photos.length > 0) {
+      // Verificar si el usuario seleccionó explícitamente nuevos valores
+      const hasNewPhotoCount = initialPhotoCount > 0;
+      const hasNewLayoutId = initialLayoutId !== '';
+      
+      // Verificar si los valores iniciales son DIFERENTES del caché (indica cambio intencional)
+      const photoCountChanged = cached && cached.photoCount !== initialPhotoCount && hasNewPhotoCount;
+      const layoutIdChanged = cached && cached.layoutId !== initialLayoutId && hasNewLayoutId;
+      const hasChanges = photoCountChanged || layoutIdChanged;
+      
+      console.log('🔍 Análisis de cache vs props:', {
+        cached: cached ? {
+          photoCount: cached.photoCount,
+          layoutId: cached.layoutId,
+          photosLength: cached.photos?.length
+        } : null,
+        props: {
+          initialPhotoCount,
+          initialLayoutId
+        },
+        checks: {
+          hasNewPhotoCount,
+          hasNewLayoutId,
+          photoCountChanged,
+          layoutIdChanged,
+          hasChanges
+        }
+      });
+      
+      if (cached && cached.photos.length > 0 && !hasChanges) {
+        console.log('✅ RAMA 1: Restaurando desde caché (sin cambios del usuario)');
+        // Cargar del caché solo si NO hay cambios intencionales del usuario
         // Primero restaurar colores ANTES de fotos para que ya estén seteados
         if (cached.backgroundColor !== undefined) {
           console.log('Restaurando backgroundColor:', cached.backgroundColor);
@@ -572,9 +622,37 @@ export const PageEditor: React.FC<PageEditorProps> = ({
         if (cached.zoom !== undefined) {
           setZoom(cached.zoom);
         }
-      } else if (initialPhotoCount > 0) {
-        // Si no hay caché pero se especificó photoCount, dejar preparado para recibir fotos
-        setPhotoCount(initialPhotoCount);
+      } else if (hasChanges) {
+        console.log('✅ RAMA 2: Usuario cambió valores - usando nuevos y limpiando fotos');
+        // El usuario cambió los valores - usar nuevos valores y limpiar fotos
+        console.log('Usuario cambió valores:', { 
+          nuevo: { photoCount: initialPhotoCount, layoutId: initialLayoutId },
+          anterior: { photoCount: cached?.photoCount, layoutId: cached?.layoutId }
+        });
+        if (hasNewPhotoCount) {
+          setPhotoCount(initialPhotoCount);
+        }
+        if (hasNewLayoutId) {
+          setLayoutId(initialLayoutId);
+        }
+        // Limpiar fotos anteriores del caché cuando se cambia el layout
+        setPhotos([]);
+        setHistory([[]]);
+      } else if (hasNewPhotoCount || hasNewLayoutId) {
+        console.log('✅ RAMA 3: Nueva página sin caché - usando valores iniciales');
+        // Nueva página sin caché - usar valores iniciales
+        console.log('Nueva página con valores:', { 
+          photoCount: initialPhotoCount, 
+          layoutId: initialLayoutId 
+        });
+        if (hasNewPhotoCount) {
+          setPhotoCount(initialPhotoCount);
+        }
+        if (hasNewLayoutId) {
+          setLayoutId(initialLayoutId);
+        }
+      } else {
+        console.log('⚠️ RAMA 4: No se cumplió ninguna condición (caso inesperado)');
       }
       
       // Esperar más tiempo antes de permitir auto-save para que los estados se estabilicen
@@ -586,7 +664,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     };
 
     loadFromCache();
-  }, [cacheReady, pageId, initialPhotoCount]);
+  }, [cacheReady, pageId, initialPhotoCount, initialLayoutId]);
 
   // AUTO-SAVE DESHABILITADO - Ahora se guarda manualmente con el botón Guardar
   // El usuario controla cuándo capturar la preview para evitar problemas de renderizado
@@ -640,13 +718,13 @@ export const PageEditor: React.FC<PageEditorProps> = ({
         stage.y(0);
         layer.batchDraw();
 
-        // Capturar el Stage sin zoom - TODA LA IMAGEN DEL LIENZO
+        // Capturar el Stage sin zoom - TODA LA IMAGEN DEL LIENZO - MÁXIMA CALIDAD
         const dataUrl = stage.toDataURL({
           x: 0,
           y: 0,
           width: PAGE_WIDTH + BORDER_SIZE * 2,
           height: PAGE_HEIGHT + BORDER_SIZE * 2,
-          pixelRatio: 2,
+          pixelRatio: 3,  // Máxima resolución posible
         });
 
         // Restaurar zoom y posición
@@ -735,7 +813,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
 
     // Si hay photoCount y layoutId definidos, obtener el layout
     const hasPhotoCount = photoCount > 0 && layoutId;
-    const layout = hasPhotoCount ? getLayoutById(layoutId, photoCount) : null;
+    const layout = hasPhotoCount ? getLayoutById(layoutId, photoCount, BORDER_SIZE) : null;
     const gridPositions = layout ? layout.positions : [];
 
     const filesToLoad = Array.from(files).slice(0, remainingSlots);
@@ -788,6 +866,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
             return next;
           });
           setSelectedId(nextPhoto.id);
+          setHasUnsavedChanges(true); // Marcar cambios al cargar imagen
         };
       };
       reader.readAsDataURL(file as Blob);
@@ -1209,7 +1288,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
         y: 0,
         width: PAGE_WIDTH + BORDER_SIZE * 2,
         height: PAGE_HEIGHT + BORDER_SIZE * 2,
-        pixelRatio: 2,
+        pixelRatio: 3,  // Máxima resolución posible
       });
 
       console.log('📸 Preview capturada:', {
@@ -1231,6 +1310,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
       if (dataUrl && dataUrl.length > 100) {
         await savePage(pageId, photos, photoCount, dataUrl, originalX, originalY, originalZoom, layoutId, backgroundColor, borderColor, texts, stickers);
         console.log('✅ Preview guardada exitosamente en IndexedDB');
+        onSavePhotos(pageId, photos); // Guardar en estado del padre
         setHasUnsavedChanges(false); // Marcar como guardado
         setSaveMessage('✅ Guardado');
         setIsSaving(false);
@@ -1239,6 +1319,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
       } else {
         console.error('⚠️ DataURL inválido o vacío');
         await savePage(pageId, photos, photoCount, undefined, originalX, originalY, originalZoom, layoutId, backgroundColor, borderColor, texts, stickers);
+        onSavePhotos(pageId, photos); // Guardar en estado del padre
         setHasUnsavedChanges(false); // Marcar como guardado
         setSaveMessage('⚠️ Guardado (sin preview)');
         setIsSaving(false);
@@ -1260,12 +1341,13 @@ export const PageEditor: React.FC<PageEditorProps> = ({
 
   // Mostrar modal de confirmación al intentar salir (solo si hay cambios sin guardar)
   const handleBack = () => {
+    console.log('🔙 Intentando volver. Cambios sin guardar:', hasUnsavedChanges);
     if (hasUnsavedChanges) {
+      console.log('⚠️ Hay cambios sin guardar, mostrando modal...');
       setShowExitModal(true);
     } else {
-      // Si ya guardó, salir directamente
-      console.log('✅ Sin cambios sin guardar, saliendo...');
-      onSavePhotos(pageId, photos);
+      // Si ya guardó (o no hay cambios), salir directamente sin guardar de nuevo
+      console.log('✅ Sin cambios sin guardar, saliendo sin guardar...');
       onBack();
     }
   };
@@ -1287,7 +1369,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
       console.log('✅ Guardado completado, regresando al selector...');
     }
     
-    onSavePhotos(pageId, photos);
+    // handleSavePreview ya llamó a onSavePhotos, no es necesario llamarlo de nuevo
     onBack();
   };
 
@@ -1296,8 +1378,10 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     // Deseleccionar antes de salir
     setSelectedId(null);
     
-    console.log('🚪 Saliendo sin guardar cambios');
-    onSavePhotos(pageId, photos);
+    console.log('🚪 Saliendo sin guardar cambios - descartando cambios');
+    // NO llamar a onSavePhotos ni guardar preview
+    // Simplemente regresar y descartar los cambios
+    setHasUnsavedChanges(false);
     onBack();
   };
 
@@ -1307,9 +1391,10 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     setShowExitModal(false);
   };
 
-  useEffect(() => {
-    onSavePhotos(pageId, photos);
-  }, [pageId, photos, onSavePhotos]);
+  // DESHABILITADO: Auto-save automático - ahora solo se guarda manualmente
+  // useEffect(() => {
+  //   onSavePhotos(pageId, photos);
+  // }, [pageId, photos, onSavePhotos]);
 
   // Protección contra recarga/cierre de pestaña con cambios sin guardar
   useEffect(() => {
@@ -1611,47 +1696,114 @@ export const PageEditor: React.FC<PageEditorProps> = ({
               {layoutPositions.length > 1 && (
                 <Group x={BORDER_SIZE} y={BORDER_SIZE} listening={false}>
                   {(() => {
-                    // Calcular líneas divisorias únicas
-                    const verticalLines = new Set<number>();
-                    const horizontalLines = new Set<number>();
+                    // Calcular líneas entre compartimentos adyacentes
+                    const lines: Array<{type: 'v' | 'h', x: number, y: number, width: number, height: number}> = [];
                     
-                    layoutPositions.forEach((pos) => {
-                      // Líneas verticales (borde derecho de cada compartimento excepto el último)
-                      const rightEdge = pos.x + pos.width;
-                      if (rightEdge < PAGE_WIDTH - 1) {
-                        verticalLines.add(rightEdge);
-                      }
-                      
-                      // Líneas horizontales (borde inferior de cada compartimento excepto el último)
-                      const bottomEdge = pos.y + pos.height;
-                      if (bottomEdge < PAGE_HEIGHT - 1) {
-                        horizontalLines.add(bottomEdge);
-                      }
+                    // Para cada compartimento, buscar compartimentos adyacentes
+                    layoutPositions.forEach((pos1, idx1) => {
+                      layoutPositions.forEach((pos2, idx2) => {
+                        if (idx1 >= idx2) return; // Evitar duplicados
+                        
+                        const tolerance = 2; // Tolerancia para comparación de números flotantes
+                        
+                        // Verificar si son adyacentes horizontalmente (uno a la izquierda del otro)
+                        // Entre ellos debe haber exactamente un BORDER_SIZE
+                        const pos1Right = pos1.x + pos1.width;
+                        const gapH = Math.abs(pos2.x - pos1Right);
+                        
+                        if (Math.abs(gapH - BORDER_SIZE) < tolerance) {
+                          // pos2 está a la derecha de pos1 con un gap de BORDER_SIZE
+                          // Encontrar el rango Y donde se tocan
+                          const overlapTop = Math.max(pos1.y, pos2.y);
+                          const overlapBottom = Math.min(pos1.y + pos1.height, pos2.y + pos2.height);
+                          
+                          if (overlapBottom > overlapTop + tolerance) {
+                            lines.push({
+                              type: 'v',
+                              x: pos1Right,
+                              y: overlapTop - BORDER_SIZE, // Extender hacia arriba hasta el marco
+                              width: BORDER_SIZE,
+                              height: overlapBottom - overlapTop + BORDER_SIZE * 2
+                            });
+                          }
+                        }
+                        
+                        const pos2Right = pos2.x + pos2.width;
+                        const gapH2 = Math.abs(pos1.x - pos2Right);
+                        
+                        if (Math.abs(gapH2 - BORDER_SIZE) < tolerance) {
+                          // pos1 está a la derecha de pos2 con un gap de BORDER_SIZE
+                          const overlapTop = Math.max(pos1.y, pos2.y);
+                          const overlapBottom = Math.min(pos1.y + pos1.height, pos2.y + pos2.height);
+                          
+                          if (overlapBottom > overlapTop + tolerance) {
+                            lines.push({
+                              type: 'v',
+                              x: pos2Right,
+                              y: overlapTop - BORDER_SIZE,
+                              width: BORDER_SIZE,
+                              height: overlapBottom - overlapTop + BORDER_SIZE * 2
+                            });
+                          }
+                        }
+                        
+                        // Verificar si son adyacentes verticalmente (uno arriba del otro)
+                        const pos1Bottom = pos1.y + pos1.height;
+                        const gapV = Math.abs(pos2.y - pos1Bottom);
+                        
+                        if (Math.abs(gapV - BORDER_SIZE) < tolerance) {
+                          // pos2 está abajo de pos1 con un gap de BORDER_SIZE
+                          // Encontrar el rango X donde se tocan
+                          const overlapLeft = Math.max(pos1.x, pos2.x);
+                          const overlapRight = Math.min(pos1.x + pos1.width, pos2.x + pos2.width);
+                          
+                          if (overlapRight > overlapLeft + tolerance) {
+                            lines.push({
+                              type: 'h',
+                              x: overlapLeft - BORDER_SIZE,
+                              y: pos1Bottom,
+                              width: overlapRight - overlapLeft + BORDER_SIZE * 2,
+                              height: BORDER_SIZE
+                            });
+                          }
+                        }
+                        
+                        const pos2Bottom = pos2.y + pos2.height;
+                        const gapV2 = Math.abs(pos1.y - pos2Bottom);
+                        
+                        if (Math.abs(gapV2 - BORDER_SIZE) < tolerance) {
+                          // pos1 está abajo de pos2 con un gap de BORDER_SIZE
+                          const overlapLeft = Math.max(pos1.x, pos2.x);
+                          const overlapRight = Math.min(pos1.x + pos1.width, pos2.x + pos2.width);
+                          
+                          if (overlapRight > overlapLeft + tolerance) {
+                            lines.push({
+                              type: 'h',
+                              x: overlapLeft - BORDER_SIZE,
+                              y: pos2Bottom,
+                              width: overlapRight - overlapLeft + BORDER_SIZE * 2,
+                              height: BORDER_SIZE
+                            });
+                          }
+                        }
+                      });
+                    });
+                    
+                    console.log('🎯 Líneas divisorias calculadas:', {
+                      BORDER_SIZE,
+                      layoutPositions,
+                      lines
                     });
                     
                     return (
                       <>
-                        {/* Líneas verticales - extendidas hasta los bordes */}
-                        {Array.from(verticalLines).map((x, idx) => (
+                        {lines.map((line, idx) => (
                           <Rect
-                            key={`vline-${idx}`}
-                            x={x}
-                            y={-BORDER_SIZE}
-                            width={BORDER_SIZE}
-                            height={PAGE_HEIGHT + BORDER_SIZE * 2}
-                            fill={backgroundColor}
-                            listening={false}
-                          />
-                        ))}
-                        
-                        {/* Líneas horizontales - extendidas hasta los bordes */}
-                        {Array.from(horizontalLines).map((y, idx) => (
-                          <Rect
-                            key={`hline-${idx}`}
-                            x={-BORDER_SIZE}
-                            y={y}
-                            width={PAGE_WIDTH + BORDER_SIZE * 2}
-                            height={BORDER_SIZE}
+                            key={`line-${idx}`}
+                            x={line.x}
+                            y={line.y}
+                            width={line.width}
+                            height={line.height}
                             fill={backgroundColor}
                             listening={false}
                           />

@@ -104,9 +104,14 @@ function App() {
   };
 
   const handleSelectPage = (pageId: number, photoCount?: number, layoutId?: string) => {
+    console.log('🚀 App: handleSelectPage recibió', { pageId, photoCount, layoutId });
     setSelectedPageId(pageId);
     setSelectedPhotoCount(photoCount || 0);
     setSelectedLayoutId(layoutId || '');
+    console.log('🚀 App: Estados actualizados', { 
+      selectedPhotoCount: photoCount || 0, 
+      selectedLayoutId: layoutId || '' 
+    });
     setAppState('editor-edit');
   };
 
