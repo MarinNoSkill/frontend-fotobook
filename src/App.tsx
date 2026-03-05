@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { LoginScreen } from './screens/LoginScreen';
 import { PageSelector, PageEditor, MemoryModal, EmailVerificationModal } from './components';
 import { API_ENDPOINTS } from './config/api';
+import BraveBlocker from './components/BraveBlocker';
 
 type AppState = 'login' | 'email-verify' | 'memory' | 'editor-pages' | 'editor-edit';
 
@@ -158,7 +159,7 @@ function App() {
   };
 
   return (
-    <>
+    <BraveBlocker>
       {appState === 'login' && <LoginScreen onLoginRequest={handleLoginRequest} />}
 
       {appState === 'email-verify' && userData === null && (
@@ -201,7 +202,7 @@ function App() {
           layoutId={selectedLayoutId}
         />
       )}
-    </>
+    </BraveBlocker>
   );
 }
 

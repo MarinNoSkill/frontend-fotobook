@@ -96,9 +96,9 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
   const handleSelectPage = (pageId: number) => {
     setSelectedPageId(pageId);
     const cached = cachedPages.get(pageId);
-    // Si la página ya tiene fotos, ir directo al editor
-    if (cached && cached.photos && cached.photos.length > 0) {
-      onSelectPage(pageId, cached.photoCount || cached.photos.length, cached.layoutId || '');
+    // Si la página ya tiene contenido (fotos, textos o stickers), ir directo al editor
+    if (cached && (cached.photos?.length > 0 || cached.texts?.length > 0 || cached.stickers?.length > 0)) {
+      onSelectPage(pageId, cached.photoCount || cached.photos?.length || 0, cached.layoutId || '');
     } else {
       setShowPhotoSelector(true);
     }

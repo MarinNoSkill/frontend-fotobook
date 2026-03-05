@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { detectBrowserCapabilities } from '../utils/browserCompatibility';
 
 export interface Photo {
   id: string;
@@ -48,6 +49,8 @@ export interface PageData {
   layoutId?: string; // ID del layout seleccionado
   backgroundColor?: string; // Color del fondo del canvas
   borderColor?: string; // Color de los bordes/compartimentos
+  showBorders?: boolean; // Mostrar/ocultar bordes
+  customBorderSize?: number; // Grosor personalizable del borde
 }
 
 const DB_NAME = 'FotoBookDB';
@@ -57,14 +60,31 @@ const STORE_NAME = 'pages';
 export const usePageCache = () => {
   const [db, setDb] = useState<IDBDatabase | null>(null);
   const [isReady, setIsReady] = useState(false);
+  const [useFallback, setUseFallback] = useState(false);
 
-  // Inicializar IndexedDB
+  // Inicializar IndexedDB con fallback para Brave
   useEffect(() => {
     const initDB = async () => {
+      const capabilities = detectBrowserCapabilities();
+      
+      // Si es Brave y IndexedDB está bloqueado, usar localStorage como fallback
+      if (capabilities.isBrave && !capabilities.indexedDB) {
+        console.log('🦁 Brave detectado con IndexedDB bloqueado - usando localStorage fallback');
+        setUseFallback(true);
+        setIsReady(true);
+        return;
+      }
+      
       return new Promise<IDBDatabase>((resolve, reject) => {
         const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-        request.onerror = () => reject(request.error);
+        request.onerror = () => {
+          console.error('IndexedDB failed, falling back to localStorage');
+          setUseFallback(true);
+          setIsReady(true);
+          reject(request.error);
+        };
+        
         request.onsuccess = () => {
           const database = request.result;
           resolve(database);
@@ -81,11 +101,14 @@ export const usePageCache = () => {
 
     initDB()
       .then((database) => {
-        setDb(database);
-        setIsReady(true);
+        if (database) {
+          setDb(database);
+          setIsReady(true);
+        }
       })
       .catch((error) => {
-        console.error('Error initializing IndexedDB:', error);
+        console.error('Error initializing IndexedDB, using fallback:', error);
+        setUseFallback(true);
         setIsReady(true);
       });
   }, []);
@@ -103,8 +126,41 @@ export const usePageCache = () => {
       backgroundColor?: string, 
       borderColor?: string,
       texts?: TextElement[],
-      stickers?: StickerElement[]
+      stickers?: StickerElement[],
+      showBorders?: boolean,
+      customBorderSize?: number
     ) => {
+      // Fallback para localStorage cuando IndexedDB esté bloqueado (Brave)
+      if (useFallback) {
+        try {
+          const pageData: PageData = {
+            pageId,
+            photos,
+            texts,
+            stickers,
+            photoCount,
+            previewImage,
+            stageX,
+            stageY,
+            zoom,
+            layoutId,
+            backgroundColor,
+            borderColor,
+            showBorders,
+            customBorderSize,
+            lastEdited: Date.now(),
+          };
+          
+          localStorage.setItem(`fotobook_page_${pageId}`, JSON.stringify(pageData));
+          console.log(`💾 Página ${pageId} guardada en localStorage (fallback)`);
+          return true;
+        } catch (error) {
+          console.error('Error saving to localStorage fallback:', error);
+          return false;
+        }
+      }
+      
+      // Funcionamiento normal con IndexedDB
       if (!db) return false;
 
       return new Promise<boolean>((resolve) => {
@@ -124,6 +180,8 @@ export const usePageCache = () => {
           layoutId,
           backgroundColor,
           borderColor,
+          showBorders,
+          customBorderSize,
           lastEdited: Date.now(),
         };
 
@@ -133,11 +191,27 @@ export const usePageCache = () => {
         request.onsuccess = () => resolve(true);
       });
     },
-    [db]
+    [db, useFallback]
   );
 
   const loadPage = useCallback(
     async (pageId: number) => {
+      // Fallback para localStorage cuando IndexedDB esté bloqueado (Brave)
+      if (useFallback) {
+        try {
+          const stored = localStorage.getItem(`fotobook_page_${pageId}`);
+          if (stored) {
+            console.log(`📖 Página ${pageId} cargada desde localStorage (fallback)`);
+            return JSON.parse(stored);
+          }
+          return null;
+        } catch (error) {
+          console.error('Error loading from localStorage fallback:', error);
+          return null;
+        }
+      }
+      
+      // Funcionamiento normal con IndexedDB
       if (!db) return null;
 
       return new Promise<PageData | null>((resolve) => {
@@ -149,11 +223,24 @@ export const usePageCache = () => {
         request.onsuccess = () => resolve(request.result || null);
       });
     },
-    [db]
+    [db, useFallback]
   );
 
   const deletePage = useCallback(
     async (pageId: number) => {
+      // Fallback para localStorage cuando IndexedDB esté bloqueado (Brave)
+      if (useFallback) {
+        try {
+          localStorage.removeItem(`fotobook_page_${pageId}`);
+          console.log(`🗑️ Página ${pageId} eliminada de localStorage (fallback)`);
+          return true;
+        } catch (error) {
+          console.error('Error deleting from localStorage fallback:', error);
+          return false;
+        }
+      }
+      
+      // Funcionamiento normal con IndexedDB
       if (!db) return false;
 
       return new Promise<boolean>((resolve) => {
@@ -165,10 +252,32 @@ export const usePageCache = () => {
         request.onsuccess = () => resolve(true);
       });
     },
-    [db]
+    [db, useFallback]
   );
 
   const getAllPages = useCallback(async () => {
+    // Fallback para localStorage cuando IndexedDB esté bloqueado (Brave)
+    if (useFallback) {
+      try {
+        const pages: PageData[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith('fotobook_page_')) {
+            const stored = localStorage.getItem(key);
+            if (stored) {
+              pages.push(JSON.parse(stored));
+            }
+          }
+        }
+        console.log(`📚 ${pages.length} páginas cargadas desde localStorage (fallback)`);
+        return pages;
+      } catch (error) {
+        console.error('Error getting all pages from localStorage fallback:', error);
+        return [];
+      }
+    }
+    
+    // Funcionamiento normal con IndexedDB
     if (!db) return [];
 
     return new Promise<PageData[]>((resolve) => {
@@ -179,9 +288,29 @@ export const usePageCache = () => {
       request.onerror = () => resolve([]);
       request.onsuccess = () => resolve(request.result);
     });
-  }, [db]);
+  }, [db, useFallback]);
 
   const clearAll = useCallback(async () => {
+    // Fallback para localStorage cuando IndexedDB esté bloqueado (Brave)
+    if (useFallback) {
+      try {
+        const keysToDelete: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith('fotobook_page_')) {
+            keysToDelete.push(key);
+          }
+        }
+        keysToDelete.forEach(key => localStorage.removeItem(key));
+        console.log(`🧹 ${keysToDelete.length} páginas limpiadas de localStorage (fallback)`);
+        return true;
+      } catch (error) {
+        console.error('Error clearing localStorage fallback:', error);
+        return false;
+      }
+    }
+    
+    // Funcionamiento normal con IndexedDB
     if (!db) return false;
 
     return new Promise<boolean>((resolve) => {
@@ -192,7 +321,7 @@ export const usePageCache = () => {
       request.onerror = () => resolve(false);
       request.onsuccess = () => resolve(true);
     });
-  }, [db]);
+  }, [db, useFallback]);
 
   return {
     isReady,

@@ -1,9 +1,11 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { ArrowLeft, Trash2, Copy, RotateCw, Type, Smile, ArrowUp, ArrowDown } from 'lucide-react';
 import { Stage, Layer, Image as KonvaImage, Rect, Transformer, Group, Text as KonvaText } from 'react-konva';
 import Konva from 'konva';
 import { usePageCache } from '../hooks/usePageCache';
-import { getLayoutById, getBorderWidth } from '../utils/photoLayouts';
+import { getLayoutById } from '../utils/photoLayouts';
+import { detectBrowserCapabilities, showBraveCompatibilityWarning, setupBraveFallbacks } from '../utils/browserCompatibility';
+import './BorderControls.css';
 
 interface PageEditorProps {
   pageId: number;
@@ -51,8 +53,8 @@ interface StickerElement {
   zIndex: number;
 }
 
-// Cargar stickers dinámicamente desde la carpeta public/stickers
-const stickerModules = import.meta.glob('/public/stickers/*.{svg,png,jpg,jpeg}', { eager: true, as: 'url' });
+// Cargar stickers con sintaxis actualizada para evitar warnings de Vite
+const stickerModules = import.meta.glob('/public/stickers/*.{svg,png,jpg,jpeg}', { query: '?url', import: 'default', eager: true });
 const stickerPaths = Object.keys(stickerModules)
   .filter(path => !path.includes('README'))
   .map(path => path.replace('/public', ''));
@@ -143,6 +145,8 @@ const PhotoImage: React.FC<{
           anchorFill="#FFFFFF"
           anchorSize={8}
           rotateAnchorOffset={30}
+          ignoreStroke={true}
+          shouldOverdrawWholeArea={true}
           onMouseEnter={(e) => {
             const stage = e.target.getStage();
             if (stage) {
@@ -271,8 +275,8 @@ const TextElementComponent: React.FC<{
     const margin = borderSize / 4; // Margen reducido para texto
     const minX = margin;
     const minY = margin;
-    const maxX = pageWidth + borderSize * 2 - margin - textWidth;
-    const maxY = pageHeight + borderSize * 2 - margin - textHeight;
+    const maxX = pageWidth - margin - textWidth;
+    const maxY = pageHeight - margin - textHeight;
 
     node.x(Math.max(minX, Math.min(node.x(), maxX)));
     node.y(Math.max(minY, Math.min(node.y(), maxY)));
@@ -326,6 +330,14 @@ const TextElementComponent: React.FC<{
             }
             return newBox;
           }}
+          borderStroke="#39FF14"
+          borderStrokeWidth={2}
+          anchorStroke="#39FF14"
+          anchorFill="#FFFFFF"
+          anchorSize={8}
+          rotateAnchorOffset={30}
+          ignoreStroke={true}
+          shouldOverdrawWholeArea={true}
         />
       )}
     </>
@@ -340,10 +352,7 @@ const StickerElementComponent: React.FC<{
   onChange: (attrs: Partial<StickerElement>) => void;
   onDragEnd: () => void;
   onTransformEnd: () => void;
-  borderSize: number;
-  pageWidth: number;
-  pageHeight: number;
-}> = ({ sticker, isSelected, onSelect, onChange, onDragEnd, onTransformEnd, borderSize, pageWidth, pageHeight }) => {
+}> = ({ sticker, isSelected, onSelect, onChange, onDragEnd, onTransformEnd }) => {
   const [image] = useImageLoader(sticker.src);
   const imageRef = useRef<Konva.Image>(null);
   const trRef = useRef<Konva.Transformer>(null);
@@ -355,17 +364,9 @@ const StickerElementComponent: React.FC<{
     }
   }, [isSelected]);
 
-  const handleDragMove = (e: Konva.KonvaEventObject<DragEvent>) => {
-    const node = e.target;
-    
-    // Sin restricciones - stickers pueden pegarse totalmente al borde
-    const minX = 0;
-    const minY = 0;
-    const maxX = pageWidth + borderSize * 2 - node.width();
-    const maxY = pageHeight + borderSize * 2 - node.height();
-
-    node.x(Math.max(minX, Math.min(node.x(), maxX)));
-    node.y(Math.max(minY, Math.min(node.y(), maxY)));
+  const handleDragMove = () => {
+    // Sin restricciones - stickers pueden salirse del marco completamente
+    // Si se salen, se recortan automáticamente por el canvas
   };
 
   return (
@@ -382,6 +383,16 @@ const StickerElementComponent: React.FC<{
           draggable
           onClick={onSelect}
           onTap={onSelect}
+          onMouseEnter={() => {
+            if (imageRef.current?.getStage()) {
+              imageRef.current.getStage()!.container().style.cursor = 'move';
+            }
+          }}
+          onMouseLeave={() => {
+            if (imageRef.current?.getStage()) {
+              imageRef.current.getStage()!.container().style.cursor = 'default';
+            }
+          }}
           onDragMove={handleDragMove}
           onDragEnd={(e) => {
             const node = e.target;
@@ -419,6 +430,24 @@ const StickerElementComponent: React.FC<{
             }
             return newBox;
           }}
+          borderStroke="#39FF14"
+          borderStrokeWidth={2}
+          anchorStroke="#39FF14"
+          anchorFill="#FFFFFF"
+          anchorSize={8}
+          rotateAnchorOffset={30}
+          ignoreStroke={true}
+          shouldOverdrawWholeArea={true}
+          enabledAnchors={[
+            'top-left',
+            'top-right',
+            'bottom-left',
+            'bottom-right',
+            'top-center',
+            'bottom-center',
+            'middle-left',
+            'middle-right'
+          ]}
         />
       )}
     </>
@@ -528,13 +557,39 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   const [editFont, setEditFont] = useState('Arial');
   const [editFontSize, setEditFontSize] = useState(32);
   const [editTextColor, setEditTextColor] = useState('#000000');
+  
+  // Estados para controles de borde personalizables
+  const [noBorders, setNoBorders] = useState(false); // Sin bordes (invertido)
+  const [customBorderSize, setCustomBorderSize] = useState(20); // Grosor personalizable (0-100px)
 
-  const PAGE_WIDTH = 831; // 22 cm
-  const PAGE_HEIGHT = 1141; // 30.2 cm
-  const BORDER_SIZE = getBorderWidth(photoCount); // Dinámico según cantidad de fotos
-
-  // Obtener el layout seleccionado
-  const selectedLayout = photoCount > 0 && layoutId ? getLayoutById(layoutId, photoCount, BORDER_SIZE) : null;
+  // TAMAÑO FIJO DEL CANVAS TOTAL (siempre igual con o sin borde)
+  const TOTAL_CANVAS_WIDTH = 871; // 22cm + borde máximo
+  const TOTAL_CANVAS_HEIGHT = 1181; // 30.2cm + borde máximo
+  
+  // BORDER_SIZE: Marco que va ENCIMA del lienzo
+  // Para múltiples compartimentos, usar valor fijo optimizado
+  // Para página individual, usar valor personalizable del usuario
+  const BORDER_SIZE = noBorders ? 0 : (photoCount > 1 ? 20 : customBorderSize);
+  
+  // Área disponible para fotos (cambia según el borde)
+  const PAGE_WIDTH = TOTAL_CANVAS_WIDTH - (BORDER_SIZE * 2);
+  const PAGE_HEIGHT = TOTAL_CANVAS_HEIGHT - (BORDER_SIZE * 2);
+  
+  // Obtener el layout seleccionado con el BORDER_SIZE actual
+  const selectedLayout = useMemo(() => {
+    if (photoCount > 0 && layoutId) {
+      const layout = getLayoutById(layoutId, photoCount, BORDER_SIZE);
+      console.log('🔄 Layout recalculado:', {
+        photoCount,
+        layoutId,
+        BORDER_SIZE,
+        layoutName: layout ? layout.id + ' - ' + layout.name : 'null'
+      });
+      return layout;
+    }
+    return null;
+  }, [layoutId, photoCount, BORDER_SIZE]);
+  
   const layoutPositions = selectedLayout ? selectedLayout.positions : [];
 
   console.log('📊 PageEditor: Layout calculado', {
@@ -544,6 +599,25 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     selectedLayout: selectedLayout ? selectedLayout.id + ' - ' + selectedLayout.name : 'null',
     layoutPositionsCount: layoutPositions.length
   });
+
+  // 🦁 INICIALIZACION DE COMPATIBILIDAD CON BRAVE
+  useEffect(() => {
+    const initBraveCompatibility = async () => {
+      const capabilities = detectBrowserCapabilities();
+      
+      // Configurar fallbacks para Brave
+      setupBraveFallbacks(capabilities);
+      
+      // Mostrar advertencia específica si es necesario
+      showBraveCompatibilityWarning(capabilities);
+      
+      if (capabilities.isBrave) {
+        console.log('🦁 Brave Browser detectado - fallbacks activados');
+      }
+    };
+    
+    initBraveCompatibility();
+  }, []); // Solo ejecutar una vez al montar
 
   // Cargar datos del caché cuando el componente se monta
   // IndexedDB es LOCAL en el navegador, así que si se cae el wifi,
@@ -558,16 +632,21 @@ export const PageEditor: React.FC<PageEditorProps> = ({
       const hasNewPhotoCount = initialPhotoCount > 0;
       const hasNewLayoutId = initialLayoutId !== '';
       
-      // Verificar si los valores iniciales son DIFERENTES del caché (indica cambio intencional)
+      // Verificar si los valores iniciales son DIFERENTES del caché (indica cambio intencional)  
       const photoCountChanged = cached && cached.photoCount !== initialPhotoCount && hasNewPhotoCount;
       const layoutIdChanged = cached && cached.layoutId !== initialLayoutId && hasNewLayoutId;
       const hasChanges = photoCountChanged || layoutIdChanged;
+      
+      // Si ya hay contenido guardado (textos o stickers), NO pedir nueva configuración
+      const hasExistingContent = cached && (cached.texts?.length > 0 || cached.stickers?.length > 0);
       
       console.log('🔍 Análisis de cache vs props:', {
         cached: cached ? {
           photoCount: cached.photoCount,
           layoutId: cached.layoutId,
-          photosLength: cached.photos?.length
+          photosLength: cached.photos?.length,
+          textsLength: cached.texts?.length || 0,
+          stickersLength: cached.stickers?.length || 0
         } : null,
         props: {
           initialPhotoCount,
@@ -578,13 +657,26 @@ export const PageEditor: React.FC<PageEditorProps> = ({
           hasNewLayoutId,
           photoCountChanged,
           layoutIdChanged,
-          hasChanges
+          hasChanges,
+          hasExistingContent
         }
       });
       
-      if (cached && cached.photos.length > 0 && !hasChanges) {
+      // REVISED: Si hay contenido (fotos, textos, stickers), cargar desde cache sin pedir nueva config
+      if (cached && (cached.photos.length > 0 || cached.texts?.length > 0 || cached.stickers?.length > 0)) {
+        // Si hay contenido existente, SIEMPRE cargar desde caché sin pedir nueva configuración
+        console.log('🎯 HAY CONTENIDO EXISTENTE: Cargando desde caché sin pedir nueva configuración');
+        
         // Restaurando desde caché (sin cambios del usuario)
-        // Cargar del caché solo si NO hay cambios intencionales del usuario
+        // Si hay stickers o textos, SIEMPRE cargar desde caché
+        console.log('🎭 CACHE COMPLETO cargado:', {
+          photos: cached.photos.length,
+          texts: cached.texts?.length || 0,
+          stickers: cached.stickers?.length || 0,
+          backgroundColor: cached.backgroundColor,
+          borderColor: cached.borderColor
+        });
+        
         // Primero restaurar colores ANTES de fotos para que ya estén seteados
         if (cached.backgroundColor !== undefined) {
           console.log('Restaurando backgroundColor:', cached.backgroundColor);
@@ -593,6 +685,20 @@ export const PageEditor: React.FC<PageEditorProps> = ({
         if (cached.borderColor !== undefined) {
           console.log('Restaurando borderColor:', cached.borderColor);
           setBorderColor(cached.borderColor);
+        }
+        
+        // Restaurar configuración de bordes con valores por defecto
+        if (cached.showBorders !== undefined) {
+          console.log('Restaurando noBorders:', !cached.showBorders);
+          setNoBorders(!cached.showBorders); // Invertir para el nuevo control
+        } else {
+          setNoBorders(false); // Por defecto CON bordes
+        }
+        if (cached.customBorderSize !== undefined) {
+          console.log('Restaurando customBorderSize:', cached.customBorderSize);
+          setCustomBorderSize(cached.customBorderSize);
+        } else {
+          setCustomBorderSize(20); // Por defecto grosor normal
         }
         
         // Restaurar layoutId ANTES de las fotos
@@ -607,9 +713,11 @@ export const PageEditor: React.FC<PageEditorProps> = ({
         
         // Restaurar textos y stickers si existen
         if (cached.texts) {
+          console.log('🔥 Restaurando textos desde caché:', cached.texts);
           setTexts(cached.texts);
         }
         if (cached.stickers) {
+          console.log('🔥 Restaurando stickers desde caché:', cached.stickers);
           setStickers(cached.stickers);
         }
         
@@ -664,17 +772,21 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     loadFromCache();
   }, [cacheReady, pageId, initialPhotoCount, initialLayoutId]);
 
-  // AUTO-SAVE DESHABILITADO - Ahora se guarda manualmente con el botón Guardar
-  // El usuario controla cuándo capturar la preview para evitar problemas de renderizado
-  /*
+  // AUTO-SAVE: Solo guardar automáticamente cuando hay imágenes (lógica original)
   useEffect(() => {
     // No guardar si estamos haciendo reset o cargando la caché inicial
-    if (!cacheReady || !stageRef.current || isResetting || isLoadingCache) {
-      console.log('Auto-save bloqueado:', { cacheReady, hasStage: !!stageRef.current, isResetting, isLoadingCache });
+    if (!cacheReady || !stageRef.current || isLoadingCache) {
+      console.log('Auto-save bloqueado:', { cacheReady, hasStage: !!stageRef.current, isLoadingCache });
       return;
     }
 
-    console.log('Auto-save disparado');
+    // Solo guardar automáticamente si hay imágenes
+    if (photos.length === 0) {
+      console.log('Auto-save saltado: No hay imágenes cargadas');
+      return;
+    }
+
+    console.log('Auto-save disparado: hay', photos.length, 'imágenes');
 
     // Esperar 500ms para que todo se renderice completamente
     const timer = setTimeout(async () => {
@@ -684,25 +796,8 @@ export const PageEditor: React.FC<PageEditorProps> = ({
         
         if (!stage || !layer) return;
 
-        // Forzar actualización del layer para asegurar que los colores actuales se aplican
+        // Forzar actualización del layer
         layer.batchDraw();
-        layer.batchDraw();
-
-        // Esperar 200ms adicionales para el render
-        await new Promise(resolve => setTimeout(resolve, 200));
-
-        // Debug: verificar qué hay en el layer
-        const allNodes = layer.find('Text, Image, Rect');
-        const rects = layer.find('Rect') as Konva.Rect[];
-        console.log('Elementos en layer antes de capturar:', {
-          total: allNodes.length,
-          texts: layer.find('Text').length,
-          images: layer.find('Image').length,
-          rects: rects.length,
-          rectColors: rects.map(r => ({ fill: r.fill(), x: r.x(), y: r.y() }))
-        });
-
-        console.log('Colores actuales en state:', { backgroundColor, borderColor });
 
         // Guardar zoom/posición actual
         const originalZoom = zoom;
@@ -720,8 +815,8 @@ export const PageEditor: React.FC<PageEditorProps> = ({
         const dataUrl = stage.toDataURL({
           x: 0,
           y: 0,
-          width: PAGE_WIDTH + BORDER_SIZE * 2,
-          height: PAGE_HEIGHT + BORDER_SIZE * 2,
+          width: TOTAL_CANVAS_WIDTH,
+          height: TOTAL_CANVAS_HEIGHT,
           pixelRatio: 3,  // Máxima resolución posible
         });
 
@@ -732,30 +827,34 @@ export const PageEditor: React.FC<PageEditorProps> = ({
         stage.y(originalY);
         stage.draw();
 
-        // Guardar posición y zoom para restauración
-        const currentX = originalX;
-        const currentY = originalY;
-        const currentZoom = originalZoom;
-
-        console.log('Guardando página con colores:', { backgroundColor, borderColor, hasTexts: texts.length, hasStickers: stickers.length });
+        console.log('Guardando automáticamente página con:', { 
+          photos: photos.length, 
+          texts: texts.length, 
+          stickers: stickers.length 
+        });
 
         if (dataUrl && dataUrl.length > 100) {
-          savePage(pageId, photos, photoCount, dataUrl, currentX, currentY, currentZoom, layoutId, backgroundColor, borderColor, texts, stickers);
+          savePage(pageId, photos, photoCount, dataUrl, originalX, originalY, originalZoom, layoutId, backgroundColor, borderColor, texts, stickers, !noBorders, customBorderSize);
         } else {
-          savePage(pageId, photos, photoCount, undefined, currentX, currentY, currentZoom, layoutId, backgroundColor, borderColor, texts, stickers);
+          savePage(pageId, photos, photoCount, undefined, originalX, originalY, originalZoom, layoutId, backgroundColor, borderColor, texts, stickers, !noBorders, customBorderSize);
         }
+
+        // IMPORTANTE: También actualizar editedPages para que el selector sepa que está editada
+        onSavePhotos(pageId, photos);
       } catch (error) {
-        console.error('Error al guardar:', error);
+        console.error('Error en auto-save:', error);
         const stage = stageRef.current;
         const currentX = stage?.x() || 0;
         const currentY = stage?.y() || 0;
-        savePage(pageId, photos, photoCount, undefined, currentX, currentY, zoom, layoutId, backgroundColor, borderColor, texts, stickers);
+        savePage(pageId, photos, photoCount, undefined, currentX, currentY, zoom, layoutId, backgroundColor, borderColor, texts, stickers, !noBorders, customBorderSize);
+        
+        // IMPORTANTE: Aunque haya error, actualizar editedPages
+        onSavePhotos(pageId, photos);
       }
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [photos, photoCount, cacheReady, pageId, savePage, zoom, layoutId, backgroundColor, borderColor, isResetting, isLoadingCache, texts, stickers]);
-  */
+  }, [photos, texts, stickers, photoCount, cacheReady, pageId, savePage, zoom, layoutId, backgroundColor, borderColor, isLoadingCache, noBorders, customBorderSize]);
 
   // Ajustar tamaño del stage al contenedor
   useEffect(() => {
@@ -785,13 +884,30 @@ export const PageEditor: React.FC<PageEditorProps> = ({
         setStagePosition(null); // Solo restaurar una vez
       } else if (photos.length === 0) {
         // Solo centrar si no hay fotos (página nueva)
-        const offsetX = (stageSize.width - (PAGE_WIDTH + BORDER_SIZE * 2) * zoom) / 2;
-        const offsetY = (stageSize.height - (PAGE_HEIGHT + BORDER_SIZE * 2) * zoom) / 2;
+        const offsetX = (stageSize.width - TOTAL_CANVAS_WIDTH * zoom) / 2;
+        const offsetY = (stageSize.height - TOTAL_CANVAS_HEIGHT * zoom) / 2;
         stage.x(Math.max(0, offsetX));
         stage.y(Math.max(0, offsetY));
       }
     }
-  }, [isLoadingCache, stagePosition, stageSize]);
+  }, [stagePosition, photos.length, TOTAL_CANVAS_WIDTH, zoom, stageSize, isLoadingCache]);
+
+  // Efecto para mantener el canvas centrado cuando cambia el tamaño del borde
+  useEffect(() => {
+    if (stageRef.current && !isLoadingCache) {
+      const stage = stageRef.current;
+      
+      // Mantener centrado cuando cambia el tamaño del borde
+      const offsetX = (stageSize.width - TOTAL_CANVAS_WIDTH * zoom) / 2;
+      const offsetY = (stageSize.height - TOTAL_CANVAS_HEIGHT * zoom) / 2;
+      
+      // Solo ajustar si el canvas cabe en la pantalla
+      if (TOTAL_CANVAS_WIDTH * zoom <= stageSize.width && TOTAL_CANVAS_HEIGHT * zoom <= stageSize.height) {
+        stage.x(Math.max(0, offsetX));
+        stage.y(Math.max(0, offsetY));
+      }
+    }
+  }, [TOTAL_CANVAS_WIDTH, TOTAL_CANVAS_HEIGHT, zoom, stageSize, isLoadingCache]);
 
   const pushHistory = useCallback((nextPhotos: Photo[]) => {
     setHistory((prev) => [...prev.slice(-19), nextPhotos]);
@@ -887,6 +1003,8 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     setClipboard(null);
     setBackgroundColor('#D4AF37'); // Resetear marco exterior (borde para el usuario)
     setBorderColor('#1A3A52'); // Resetear compartimentos (fondo para el usuario)
+    setNoBorders(false); // Resetear a CON bordes
+    setCustomBorderSize(20); // Resetear grosor a normal
     setShowResetModal(false);
     
     // Primero limpiar IndexedDB (await para asegurar que complete)
@@ -913,8 +1031,8 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     const newTextElement: TextElement = {
       id: Math.random().toString(36).slice(2, 11),
       text: newText.trim(),
-      x: (PAGE_WIDTH + BORDER_SIZE * 2) / 2 - 50,
-      y: (PAGE_HEIGHT + BORDER_SIZE * 2) / 2 - 20,
+      x: TOTAL_CANVAS_WIDTH / 2 - 50,
+      y: TOTAL_CANVAS_HEIGHT / 2 - 20,
       fontSize: selectedFontSize,
       fontFamily: selectedFont,
       fill: selectedTextColor,
@@ -963,8 +1081,8 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     const newSticker: StickerElement = {
       id: Math.random().toString(36).slice(2, 11),
       src: stickerPath,
-      x: (PAGE_WIDTH + BORDER_SIZE * 2) / 2 - 50,
-      y: (PAGE_HEIGHT + BORDER_SIZE * 2) / 2 - 50,
+      x: TOTAL_CANVAS_WIDTH / 2 - 50,
+      y: TOTAL_CANVAS_HEIGHT / 2 - 50,
       width: 100,
       height: 100,
       rotation: 0,
@@ -1280,19 +1398,43 @@ export const PageEditor: React.FC<PageEditorProps> = ({
         groups: layer.find('Group').length
       });
 
-      // Capturar con máxima calidad
-      const dataUrl = stage.toDataURL({
-        x: 0,
-        y: 0,
-        width: PAGE_WIDTH + BORDER_SIZE * 2,
-        height: PAGE_HEIGHT + BORDER_SIZE * 2,
-        pixelRatio: 3,  // Máxima resolución posible
-      });
+      // Capturar con máxima calidad - con detección de bloqueo en Brave
+      let dataUrl = '';
+      let canvasBlocked = false;
+      
+      try {
+        dataUrl = stage.toDataURL({
+          x: 0,
+          y: 0,
+          width: TOTAL_CANVAS_WIDTH,
+          height: TOTAL_CANVAS_HEIGHT,
+          pixelRatio: 3,  // Máxima resolución posible
+        });
+        
+        // Verificar si el dataURL es válido o si Brave lo bloqueó
+        if (!dataUrl || dataUrl.length < 100 || dataUrl === 'data:,') {
+          canvasBlocked = true;
+        }
+      } catch (error) {
+        console.error('🚫 Canvas bloqueado por el navegador (probablemente Brave):', error);
+        canvasBlocked = true;
+      }
 
-      console.log('📸 Preview capturada:', {
-        length: dataUrl.length,
-        starts: dataUrl.substring(0, 50)
-      });
+      const capabilities = detectBrowserCapabilities();
+      
+      if (canvasBlocked && capabilities.isBrave) {
+        console.log('🦁 Canvas bloqueado en Brave - guardando sin preview');
+        setSaveMessage('⚠️ Brave: Guardado sin preview');
+      } else if (canvasBlocked) {
+        console.log('🚫 Canvas bloqueado por configuraciones de privacidad');
+        setSaveMessage('⚠️ Guardado sin preview');
+      } else {
+        console.log('📸 Preview capturada exitosamente:', {
+          length: dataUrl.length,
+          starts: dataUrl.substring(0, 50)
+        });
+        setSaveMessage('✅ Guardado');
+      }
 
       // Restaurar estado
       stage.scaleX(originalZoom);
@@ -1304,26 +1446,36 @@ export const PageEditor: React.FC<PageEditorProps> = ({
       // Quitar el overlay
       overlay.remove();
 
-      // Guardar en caché
-      if (dataUrl && dataUrl.length > 100) {
-        await savePage(pageId, photos, photoCount, dataUrl, originalX, originalY, originalZoom, layoutId, backgroundColor, borderColor, texts, stickers);
-        console.log('✅ Preview guardada exitosamente en IndexedDB');
-        onSavePhotos(pageId, photos); // Guardar en estado del padre
-        setHasUnsavedChanges(false); // Marcar como guardado
-        setSaveMessage('✅ Guardado');
-        setIsSaving(false);
-        setTimeout(() => setSaveMessage(null), 2000);
-        return true;
+      // Guardar en caché - con o sin preview dependiendo de las capacidades del navegador
+      const finalDataUrl = canvasBlocked ? undefined : dataUrl;
+      
+      console.log('💾 GUARDANDO EN CACHE:', {
+        pageId,
+        photos: photos.length,
+        texts: texts.length,
+        stickers: stickers.length,
+        layoutId,
+        backgroundColor,
+        borderColor,
+        customBorderSize,
+        noBorders: !noBorders
+      });
+      
+      await savePage(pageId, photos, photoCount, finalDataUrl, originalX, originalY, originalZoom, layoutId, backgroundColor, borderColor, texts, stickers, !noBorders, customBorderSize);
+      
+      if (capabilities.isBrave && canvasBlocked) {
+        console.log('🦁 Página guardada en Brave sin preview (canvas bloqueado)');
+      } else if (canvasBlocked) {
+        console.log('⚠️ Página guardada sin preview (canvas bloqueado por configuraciones de privacidad)');
       } else {
-        console.error('⚠️ DataURL inválido o vacío');
-        await savePage(pageId, photos, photoCount, undefined, originalX, originalY, originalZoom, layoutId, backgroundColor, borderColor, texts, stickers);
-        onSavePhotos(pageId, photos); // Guardar en estado del padre
-        setHasUnsavedChanges(false); // Marcar como guardado
-        setSaveMessage('⚠️ Guardado (sin preview)');
-        setIsSaving(false);
-        setTimeout(() => setSaveMessage(null), 2000);
-        return true;
+        console.log('✅ Página y preview guardadas exitosamente');
       }
+      
+      onSavePhotos(pageId, photos); // Guardar en estado del padre
+      setHasUnsavedChanges(false); // Marcar como guardado
+      setIsSaving(false);
+      setTimeout(() => setSaveMessage(null), 3000);
+      return true;
     } catch (error) {
       console.error('❌ Error al guardar preview:', error);
       // Quitar overlay si existe
@@ -1647,12 +1799,12 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                 name="background"
                 x={0}
                 y={0}
-                width={PAGE_WIDTH + BORDER_SIZE * 2}
-                height={PAGE_HEIGHT + BORDER_SIZE * 2}
+                width={TOTAL_CANVAS_WIDTH}
+                height={TOTAL_CANVAS_HEIGHT}
                 fill={borderColor}
               />
 
-              {/* FOTOS encima del fondo azul */}
+              {/* FOTOS encima del fondo azul - CLIPEADAS */}
               <Group
                 x={BORDER_SIZE}
                 y={BORDER_SIZE}
@@ -1691,138 +1843,122 @@ export const PageEditor: React.FC<PageEditorProps> = ({
               </Group>
 
               {/* LÍNEAS DORADAS que dividen según layout */}
-              {layoutPositions.length > 1 && (
-                <Group x={BORDER_SIZE} y={BORDER_SIZE} listening={false}>
-                  {(() => {
-                    // Calcular líneas entre compartimentos adyacentes
-                    const lines: Array<{type: 'v' | 'h', x: number, y: number, width: number, height: number}> = [];
-                    
-                    // Para cada compartimento, buscar compartimentos adyacentes
-                    layoutPositions.forEach((pos1, idx1) => {
-                      layoutPositions.forEach((pos2, idx2) => {
-                        if (idx1 >= idx2) return; // Evitar duplicados
-                        
-                        const tolerance = 2; // Tolerancia para comparación de números flotantes
-                        
-                        // Verificar si son adyacentes horizontalmente (uno a la izquierda del otro)
-                        // Entre ellos debe haber exactamente un BORDER_SIZE
-                        const pos1Right = pos1.x + pos1.width;
-                        const gapH = Math.abs(pos2.x - pos1Right);
-                        
-                        if (Math.abs(gapH - BORDER_SIZE) < tolerance) {
-                          // pos2 está a la derecha de pos1 con un gap de BORDER_SIZE
-                          // Encontrar el rango Y donde se tocan
-                          const overlapTop = Math.max(pos1.y, pos2.y);
-                          const overlapBottom = Math.min(pos1.y + pos1.height, pos2.y + pos2.height);
-                          
-                          if (overlapBottom > overlapTop + tolerance) {
-                            lines.push({
-                              type: 'v',
-                              x: pos1Right,
-                              y: overlapTop - BORDER_SIZE, // Extender hacia arriba hasta el marco
-                              width: BORDER_SIZE,
-                              height: overlapBottom - overlapTop + BORDER_SIZE * 2
-                            });
-                          }
-                        }
-                        
-                        const pos2Right = pos2.x + pos2.width;
-                        const gapH2 = Math.abs(pos1.x - pos2Right);
-                        
-                        if (Math.abs(gapH2 - BORDER_SIZE) < tolerance) {
-                          // pos1 está a la derecha de pos2 con un gap de BORDER_SIZE
-                          const overlapTop = Math.max(pos1.y, pos2.y);
-                          const overlapBottom = Math.min(pos1.y + pos1.height, pos2.y + pos2.height);
-                          
-                          if (overlapBottom > overlapTop + tolerance) {
-                            lines.push({
-                              type: 'v',
-                              x: pos2Right,
-                              y: overlapTop - BORDER_SIZE,
-                              width: BORDER_SIZE,
-                              height: overlapBottom - overlapTop + BORDER_SIZE * 2
-                            });
-                          }
-                        }
-                        
-                        // Verificar si son adyacentes verticalmente (uno arriba del otro)
-                        const pos1Bottom = pos1.y + pos1.height;
-                        const gapV = Math.abs(pos2.y - pos1Bottom);
-                        
-                        if (Math.abs(gapV - BORDER_SIZE) < tolerance) {
-                          // pos2 está abajo de pos1 con un gap de BORDER_SIZE
-                          // Encontrar el rango X donde se tocan
-                          const overlapLeft = Math.max(pos1.x, pos2.x);
-                          const overlapRight = Math.min(pos1.x + pos1.width, pos2.x + pos2.width);
-                          
-                          if (overlapRight > overlapLeft + tolerance) {
-                            lines.push({
-                              type: 'h',
-                              x: overlapLeft - BORDER_SIZE,
-                              y: pos1Bottom,
-                              width: overlapRight - overlapLeft + BORDER_SIZE * 2,
-                              height: BORDER_SIZE
-                            });
-                          }
-                        }
-                        
-                        const pos2Bottom = pos2.y + pos2.height;
-                        const gapV2 = Math.abs(pos1.y - pos2Bottom);
-                        
-                        if (Math.abs(gapV2 - BORDER_SIZE) < tolerance) {
-                          // pos1 está abajo de pos2 con un gap de BORDER_SIZE
-                          const overlapLeft = Math.max(pos1.x, pos2.x);
-                          const overlapRight = Math.min(pos1.x + pos1.width, pos2.x + pos2.width);
-                          
-                          if (overlapRight > overlapLeft + tolerance) {
-                            lines.push({
-                              type: 'h',
-                              x: overlapLeft - BORDER_SIZE,
-                              y: pos2Bottom,
-                              width: overlapRight - overlapLeft + BORDER_SIZE * 2,
-                              height: BORDER_SIZE
-                            });
-                          }
-                        }
-                      });
+              {layoutPositions.length > 1 && (() => {
+                // Algoritmo simplificado: generar líneas directamente del layout
+                const lines: Array<{type: 'v' | 'h', x: number, y: number, width: number, height: number}> = [];
+                
+                console.log('🎯 Calculando líneas divisorias:', {
+                  BORDER_SIZE,
+                  layoutPositions: layoutPositions.map(p => ({x: p.x, y: p.y, w: p.width, h: p.height}))
+                });
+                
+                // Encontrar todas las líneas verticales únicas
+                const verticalLines = new Set<number>();
+                layoutPositions.forEach(pos => {
+                  // Línea a la derecha de cada compartimento (si no está en el borde derecho)
+                  const rightEdge = pos.x + pos.width;
+                  if (rightEdge < PAGE_WIDTH) {
+                    verticalLines.add(rightEdge);
+                  }
+                });
+                
+                // Encontrar todas las líneas horizontales únicas
+                const horizontalLines = new Set<number>();
+                layoutPositions.forEach(pos => {
+                  // Línea abajo de cada compartimento (si no está en el borde inferior)
+                  const bottomEdge = pos.y + pos.height;
+                  if (bottomEdge < PAGE_HEIGHT) {
+                    horizontalLines.add(bottomEdge);
+                  }
+                });
+                
+                // Crear líneas verticales
+                verticalLines.forEach(x => {
+                  // Encontrar el rango Y que esta línea debe cubrir
+                  let minY = PAGE_HEIGHT;
+                  let maxY = 0;
+                  
+                  layoutPositions.forEach(pos => {
+                    // Si esta posición está a la izquierda o derecha de la línea
+                    if ((pos.x + pos.width === x) || (pos.x === x + BORDER_SIZE)) {
+                      minY = Math.min(minY, pos.y);
+                      maxY = Math.max(maxY, pos.y + pos.height);
+                    }
+                  });
+                  
+                  if (minY < maxY) {
+                    lines.push({
+                      type: 'v',
+                      x: x,
+                      y: minY,
+                      width: BORDER_SIZE,
+                      height: maxY - minY
                     });
-                    
-                    console.log('🎯 Líneas divisorias calculadas:', {
-                      BORDER_SIZE,
-                      layoutPositions,
-                      lines
+                  }
+                });
+                
+                // Crear líneas horizontales
+                horizontalLines.forEach(y => {
+                  // Encontrar el rango X que esta línea debe cubrir
+                  let minX = PAGE_WIDTH;
+                  let maxX = 0;
+                  
+                  layoutPositions.forEach(pos => {
+                    // Si esta posición está arriba o abajo de la línea
+                    if ((pos.y + pos.height === y) || (pos.y === y + BORDER_SIZE)) {
+                      minX = Math.min(minX, pos.x);
+                      maxX = Math.max(maxX, pos.x + pos.width);
+                    }
+                  });
+                  
+                  if (minX < maxX) {
+                    lines.push({
+                      type: 'h',
+                      x: minX,
+                      y: y,
+                      width: maxX - minX,
+                      height: BORDER_SIZE
                     });
-                    
-                    return (
-                      <>
-                        {lines.map((line, idx) => (
-                          <Rect
-                            key={`line-${idx}`}
-                            x={line.x}
-                            y={line.y}
-                            width={line.width}
-                            height={line.height}
-                            fill={backgroundColor}
-                            listening={false}
-                          />
-                        ))}
-                      </>
-                    );
-                  })()}
+                  }
+                });
+                
+                console.log('🎯 Líneas generadas:', {
+                  verticalLines: Array.from(verticalLines),
+                  horizontalLines: Array.from(horizontalLines),
+                  totalLines: lines.length,
+                  lines: lines.map(l => ({type: l.type, x: l.x, y: l.y, w: l.width, h: l.height}))
+                });
+                
+                return (
+                  <Group x={BORDER_SIZE} y={BORDER_SIZE} listening={false}>
+                    {lines.map((line, idx) => (
+                      <Rect
+                        key={`divider-${line.type}-${idx}-${BORDER_SIZE}`}
+                        x={line.x}
+                        y={line.y}
+                        width={line.width}
+                        height={line.height}
+                        fill={backgroundColor}
+                        listening={false}
+                      />
+                    ))}
+                  </Group>
+                );
+              })()}
+
+              {/* Marco exterior (solo si no es noBorders) */}
+              {!noBorders && (
+                <Group listening={false}>
+                  {/* Borde superior */}
+                  <Rect x={0} y={0} width={TOTAL_CANVAS_WIDTH} height={BORDER_SIZE} fill={backgroundColor} />
+                  {/* Borde inferior */}
+                  <Rect x={0} y={BORDER_SIZE + PAGE_HEIGHT} width={TOTAL_CANVAS_WIDTH} height={BORDER_SIZE} fill={backgroundColor} />
+                  {/* Borde izquierdo */}
+                  <Rect x={0} y={0} width={BORDER_SIZE} height={TOTAL_CANVAS_HEIGHT} fill={backgroundColor} />
+                  {/* Borde derecho */}
+                  <Rect x={BORDER_SIZE + PAGE_WIDTH} y={0} width={BORDER_SIZE} height={TOTAL_CANVAS_HEIGHT} fill={backgroundColor} />
                 </Group>
               )}
-
-              {/* Marco exterior dorado */}
-              <Group listening={false}>
-                {/* Borde superior */}
-                <Rect x={0} y={0} width={PAGE_WIDTH + BORDER_SIZE * 2} height={BORDER_SIZE} fill={backgroundColor} />
-                {/* Borde inferior */}
-                <Rect x={0} y={BORDER_SIZE + PAGE_HEIGHT} width={PAGE_WIDTH + BORDER_SIZE * 2} height={BORDER_SIZE} fill={backgroundColor} />
-                {/* Borde izquierdo */}
-                <Rect x={0} y={0} width={BORDER_SIZE} height={PAGE_HEIGHT + BORDER_SIZE * 2} fill={backgroundColor} />
-                {/* Borde derecho */}
-                <Rect x={BORDER_SIZE + PAGE_WIDTH} y={0} width={BORDER_SIZE} height={PAGE_HEIGHT + BORDER_SIZE * 2} fill={backgroundColor} />
-              </Group>
               
               {/* Textos (sin clipping, pueden estar en todo el lienzo) */}
               {texts
@@ -1871,11 +2007,75 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                     }}
                     onDragEnd={() => setHasUnsavedChanges(true)}
                     onTransformEnd={() => setHasUnsavedChanges(true)}
-                    borderSize={BORDER_SIZE}
-                    pageWidth={PAGE_WIDTH}
-                    pageHeight={PAGE_HEIGHT}
                   />
                 ))}
+
+              {/* Transformers de FOTOS - fuera del clipping para que siempre sean visibles */}
+              {selectedId && photos.map((photo) => 
+                photo.id === selectedId ? (
+                  <Transformer
+                    key={`photo-transformer-${photo.id}`}
+                    x={photo.x + BORDER_SIZE}
+                    y={photo.y + BORDER_SIZE}
+                    width={photo.width}
+                    height={photo.height}
+                    rotation={photo.rotation}
+                    borderStroke="#39FF14"
+                    borderStrokeWidth={2}
+                    anchorStroke="#39FF14"
+                    anchorFill="#FFFFFF"
+                    anchorSize={8}
+                    rotateAnchorOffset={30}
+                    ignoreStroke={true}
+                    shouldOverdrawWholeArea={true}
+                    boundBoxFunc={(oldBox, newBox) => {
+                      if (newBox.width < 5 || newBox.height < 5) {
+                        return oldBox;
+                      }
+                      return newBox;
+                    }}
+                    onTransformEnd={(e) => {
+                      const node = e.target;
+                      const scaleX = node.scaleX();
+                      const scaleY = node.scaleY();
+
+                      // Reset scale
+                      node.scaleX(1);
+                      node.scaleY(1);
+
+                      const newAttrs = {
+                        x: node.x() - BORDER_SIZE,
+                        y: node.y() - BORDER_SIZE,
+                        width: Math.max(5, photo.width * scaleX),
+                        height: Math.max(5, photo.height * scaleY),
+                        rotation: node.rotation(),
+                      };
+
+                      setPhotos((prev) =>
+                        prev.map((p) =>
+                          p.id === photo.id ? { ...p, ...newAttrs } : p
+                        )
+                      );
+                      pushHistory(photos);
+                      setHasUnsavedChanges(true);
+                    }}
+                    onDragEnd={(e) => {
+                      const newAttrs = {
+                        x: e.target.x() - BORDER_SIZE,
+                        y: e.target.y() - BORDER_SIZE,
+                      };
+
+                      setPhotos((prev) =>
+                        prev.map((p) =>
+                          p.id === photo.id ? { ...p, ...newAttrs } : p
+                        )
+                      );
+                      pushHistory(photos);
+                      setHasUnsavedChanges(true);
+                    }}
+                  />
+                ) : null
+              )}
             </Layer>
           </Stage>
         </div>
@@ -1932,6 +2132,131 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                   }}
                   className="w-full h-10 border border-gray-300 rounded cursor-pointer"
                 />
+              </div>
+            </div>
+          </div>
+
+          {/* Controles de Borde */}
+          <div className="bg-white border-2 border-[#39FF14] rounded-lg p-4">
+            <label className="block text-sm font-bebas text-[#003300] mb-3">
+              Configuración de Bordes
+            </label>
+            <div className="space-y-4">
+              {/* Toggle para sin bordes - SIEMPRE DISPONIBLE */}
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bebas text-gray-600">
+                  Sin Bordes
+                </label>
+                <button
+                  onClick={() => {
+                    setNoBorders(!noBorders);
+                    setHasUnsavedChanges(true);
+                  }}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    noBorders ? 'bg-[#FF6B6B]' : 'bg-[#39FF14]'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      noBorders ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* Información para múltiples compartimentos */}
+              {photoCount > 1 && !noBorders && (
+                <div className="bg-amber-50 border border-amber-200 rounded p-3">
+                  <p className="text-xs text-amber-700 font-bebas">
+                    ℹ️ MODO MÚLTIPLE ({photoCount} compartimentos)
+                  </p>
+                  <p className="text-xs text-amber-600">
+                    El grosor del borde está optimizado automáticamente para layouts múltiples.
+                    Solo puedes quitar bordes completamente o usar el grosor estándar.
+                  </p>
+                </div>
+              )}
+
+              {/* Control de grosor de borde - SOLO PARA PÁGINA INDIVIDUAL */}
+              {!noBorders && photoCount === 1 && (
+                <div>
+                  <label className="block text-xs font-bebas text-gray-600 mb-2">
+                    Grosor del Marco: {customBorderSize}px
+                  </label>
+                  <input
+                    type="range"
+                    min="5"
+                    max="100"
+                    value={customBorderSize}
+                    onChange={(e) => {
+                      const newSize = parseInt(e.target.value);
+                      setCustomBorderSize(newSize);
+                      setHasUnsavedChanges(true);
+                    }}
+                    style={{
+                      background: `linear-gradient(to right, #39FF14 0%, #39FF14 ${(customBorderSize - 5) / 95 * 100}%, #E5E7EB ${(customBorderSize - 5) / 95 * 100}%, #E5E7EB 100%)`
+                    }}
+                    className="slider w-full"
+                  />
+                  <div className="flex justify-between text-xs text-gray-500 mt-1">
+                    <span>Fino (5px)</span>
+                    <span>Grueso (100px)</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Presets rápidos - SOLO PARA PÁGINA INDIVIDUAL */}
+              {!noBorders && photoCount === 1 && (
+                <div>
+                  <label className="block text-xs font-bebas text-gray-600 mb-2">
+                    Presets Rápidos
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      onClick={() => {
+                        setCustomBorderSize(10);
+                        setNoBorders(false);
+                        setHasUnsavedChanges(true);
+                      }}
+                      className="px-3 py-2 bg-gray-100 text-gray-700 rounded text-xs font-bebas hover:bg-gray-200 transition-all"
+                    >
+                      Delgado
+                    </button>
+                    <button
+                      onClick={() => {
+                        setCustomBorderSize(30);
+                        setNoBorders(false);
+                        setHasUnsavedChanges(true);
+                      }}
+                      className="px-3 py-2 bg-gray-100 text-gray-700 rounded text-xs font-bebas hover:bg-gray-200 transition-all"
+                    >
+                      Normal
+                    </button>
+                    <button
+                      onClick={() => {
+                        setCustomBorderSize(60);
+                        setNoBorders(false);
+                        setHasUnsavedChanges(true);
+                      }}
+                      className="px-3 py-2 bg-gray-100 text-gray-700 rounded text-xs font-bebas hover:bg-gray-200 transition-all"
+                    >
+                      Grueso
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Información del lienzo */}
+              <div className="bg-blue-50 border border-blue-200 rounded p-3">
+                <p className="text-xs text-blue-700 font-bebas">
+                  📏 LIENZO: {PAGE_WIDTH} × {PAGE_HEIGHT}px (22×30.2cm)
+                </p>
+                <p className="text-xs text-blue-600">
+                  {noBorders ? '⬜ Sin marco exterior' : photoCount > 1 ? `🔲 Marco automático` : `🔲 Con marco: ${customBorderSize}px`}
+                </p>
+                <p className="text-xs text-blue-500">
+                  📐 Total: {TOTAL_CANVAS_WIDTH} × {TOTAL_CANVAS_HEIGHT}px
+                </p>
               </div>
             </div>
           </div>
@@ -2116,9 +2441,9 @@ export const PageEditor: React.FC<PageEditorProps> = ({
       {saveMessage && (
         <div className="fixed top-24 right-6 z-50 animate-slideInRight">
           <div className={`px-6 py-3 rounded-lg shadow-2xl font-bebas text-lg flex items-center gap-2 ${
-            saveMessage.includes('✅') 
+            saveMessage?.includes('✅') 
               ? 'bg-green-500 text-white' 
-              : saveMessage.includes('⚠️')
+              : saveMessage?.includes('⚠️')
               ? 'bg-yellow-500 text-white'
               : 'bg-red-500 text-white'
           }`}>
