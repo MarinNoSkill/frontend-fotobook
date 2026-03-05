@@ -553,7 +553,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
       if (!cacheReady) return;
 
       // Cargando último estado guardado desde IndexedDB (local)
-      
+      const cached = await loadPage(pageId);
       // Verificar si el usuario seleccionó explícitamente nuevos valores
       const hasNewPhotoCount = initialPhotoCount > 0;
       const hasNewLayoutId = initialLayoutId !== '';
