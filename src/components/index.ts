@@ -10,3 +10,4 @@ export { PageSelector } from './PageSelector';
 export { PhotoGridSelector } from './PhotoGridSelector';
 export { PageEditor } from './PageEditor';
 export { FinalizationModal } from './FinalizationModal';
+export { ImageCropModal } from './ImageCropModal';

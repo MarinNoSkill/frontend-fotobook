@@ -1,10 +1,12 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { ArrowLeft, Trash2, Copy, RotateCw, Type, Smile, ArrowUp, ArrowDown } from 'lucide-react';
+        import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { ArrowLeft, Trash2, Copy, RotateCw, Type, Smile, ArrowUp, ArrowDown, Crop } from 'lucide-react';
 import { Stage, Layer, Image as KonvaImage, Rect, Transformer, Group, Text as KonvaText } from 'react-konva';
 import Konva from 'konva';
 import { usePageCache } from '../hooks/usePageCache';
 import { getLayoutById } from '../utils/photoLayouts';
 import { detectBrowserCapabilities, showBraveCompatibilityWarning, setupBraveFallbacks } from '../utils/browserCompatibility';
+import { ImageCropModal } from './ImageCropModal';
+import type { CropInfo } from './ImageCropModal';
 import './BorderControls.css';
 
 interface PageEditorProps {
@@ -558,6 +560,15 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   const [editFontSize, setEditFontSize] = useState(32);
   const [editTextColor, setEditTextColor] = useState('#000000');
   
+  // Estados para modal de recorte de imágenes
+  const [showCropModal, setShowCropModal] = useState(false);
+  const [cropImageData, setCropImageData] = useState<string>('');
+  const [cropImageId, setCropImageId] = useState<string>('');
+  const [originalPhotoState, setOriginalPhotoState] = useState<Photo | null>(null);
+
+  // Requerimiento: no persistir cambios automáticamente.
+  const AUTO_SAVE_ENABLED = false;
+  
   // Estados para controles de borde personalizables
   const [noBorders, setNoBorders] = useState(false); // Sin bordes (invertido)
   const [customBorderSize, setCustomBorderSize] = useState(20); // Grosor personalizable (0-100px)
@@ -774,9 +785,25 @@ export const PageEditor: React.FC<PageEditorProps> = ({
 
   // AUTO-SAVE: Solo guardar automáticamente cuando hay imágenes (lógica original)
   useEffect(() => {
+    if (!AUTO_SAVE_ENABLED) {
+      return;
+    }
+
     // No guardar si estamos haciendo reset o cargando la caché inicial
     if (!cacheReady || !stageRef.current || isLoadingCache) {
       console.log('Auto-save bloqueado:', { cacheReady, hasStage: !!stageRef.current, isLoadingCache });
+      return;
+    }
+
+    // No guardar si el modal de crop está abierto para evitar guardar cambios no aplicados
+    if (showCropModal) {
+      console.log('Auto-save bloqueado: Modal de crop abierto');
+      return;
+    }
+    
+    // No guardar si hay cambios temporales de recorte sin aplicar
+    if (originalPhotoState) {
+      console.log('Auto-save bloqueado: Cambios de recorte sin aplicar');
       return;
     }
 
@@ -854,7 +881,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [photos, texts, stickers, photoCount, cacheReady, pageId, savePage, zoom, layoutId, backgroundColor, borderColor, isLoadingCache, noBorders, customBorderSize]);
+  }, [AUTO_SAVE_ENABLED, photos, texts, stickers, photoCount, cacheReady, pageId, savePage, zoom, layoutId, backgroundColor, borderColor, isLoadingCache, noBorders, customBorderSize, showCropModal, originalPhotoState]);
 
   // Ajustar tamaño del stage al contenedor
   useEffect(() => {
@@ -1170,6 +1197,66 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     
     setSelectedId(null);
   };
+
+  // Función para abrir el modal de recorte
+  const handleCropImage = () => {
+    if (!selectedId) return;
+    
+    const selectedPhoto = photos.find(p => p.id === selectedId);
+    if (!selectedPhoto) return;
+    
+    // Guardar estado original para poder restaurar si se cancela
+    setOriginalPhotoState({ ...selectedPhoto });
+    setCropImageData(selectedPhoto.src);
+    setCropImageId(selectedPhoto.id);
+    setShowCropModal(true);
+  };
+
+  // Función para aplicar el recorte
+  const handleCropComplete = (croppedImageData: string, cropInfo: CropInfo) => {
+    if (!cropImageId) return;
+    
+    setPhotos((prev) => {
+      const next = prev.map((photo) => {
+        if (photo.id === cropImageId) {
+          return {
+            ...photo,
+            src: croppedImageData,
+            width: cropInfo.canvasWidth,
+            height: cropInfo.canvasHeight,
+          };
+        }
+        return photo;
+      });
+      
+      pushHistory(next);
+      setHasUnsavedChanges(true);
+      return next;
+    });
+    
+    // Cerrar el modal y limpiar estados
+    setShowCropModal(false);
+    setCropImageData('');
+    setCropImageId('');
+    setOriginalPhotoState(null);
+  };
+
+  // Función para cerrar el modal de recorte
+  const handleCropCancel = () => {
+    // Restaurar estado original si había cambios
+    if (originalPhotoState && cropImageId) {
+      setPhotos((prev) => 
+        prev.map((photo) => 
+          photo.id === cropImageId ? originalPhotoState : photo
+        )
+      );
+    }
+    
+    setShowCropModal(false);
+    setCropImageData('');
+    setCropImageId('');
+    setOriginalPhotoState(null);
+  };
   
   // Funciones para mover elementos con flechas
   const handleMoveSelected = (direction: 'up' | 'down' | 'left' | 'right') => {
@@ -1313,12 +1400,18 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   };
 
   // Función para guardar manualmente la preview
-  const handleSavePreview = async () => {
+  const handleSavePreview = async (): Promise<boolean> => {
+    if (showCropModal || originalPhotoState) {
+      setSaveMessage('⚠️ Aplica o cancela recorte');
+      setTimeout(() => setSaveMessage(null), 2000);
+      return false;
+    }
+
     if (!stageRef.current || !layerRef.current || !containerRef.current) {
       console.log('Stage o Layer no disponible para guardar');
       setSaveMessage('❌ Error al guardar');
       setTimeout(() => setSaveMessage(null), 2000);
-      return;
+      return false;
     }
 
     // Deseleccionar cualquier elemento antes de capturar
@@ -1732,9 +1825,9 @@ export const PageEditor: React.FC<PageEditorProps> = ({
             <div className="flex flex-col items-start gap-1">
               <button
                 onClick={handleSavePreview}
-                disabled={isSaving}
+                disabled={isSaving || showCropModal || !!originalPhotoState}
                 className={`flex items-center gap-2 px-4 py-2 font-bebas rounded-lg transition-all shadow-md ${
-                  isSaving 
+                  isSaving || showCropModal || !!originalPhotoState
                     ? 'bg-gray-400 text-gray-700 cursor-not-allowed' 
                     : saveMessage?.includes('✅')
                     ? 'bg-green-500 text-white'
@@ -2281,6 +2374,15 @@ export const PageEditor: React.FC<PageEditorProps> = ({
             </button>
 
             <button
+              onClick={handleCropImage}
+              disabled={!selectedId || !photos.find(p => p.id === selectedId)}
+              className="w-full flex items-center gap-2 px-4 py-2 bg-[#FFD700] text-[#003300] rounded-lg font-bebas hover:bg-[#FFC107] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            >
+              <Crop className="w-4 h-4" />
+              Recortar Imagen
+            </button>
+
+            <button
               onClick={handleUndo}
               className="w-full flex items-center gap-2 px-4 py-2 border-2 border-[#39FF14] text-[#39FF14] rounded-lg font-bebas hover:bg-[#39FF14]/10 transition-all"
             >
@@ -2686,6 +2788,16 @@ export const PageEditor: React.FC<PageEditorProps> = ({
             </button>
           </div>
         </div>
+      )}
+
+      {/* Modal de recorte de imagen */}
+      {showCropModal && (
+        <ImageCropModal
+          isOpen={showCropModal}
+          onClose={handleCropCancel}
+          imageData={cropImageData}
+          onCropComplete={handleCropComplete}
+        />
       )}
     </div>
   );
