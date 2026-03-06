@@ -1,5 +1,5 @@
         import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { ArrowLeft, Trash2, Copy, RotateCw, Type, Smile, ArrowUp, ArrowDown, Crop } from 'lucide-react';
+import { ArrowLeft, Trash2, Copy, RotateCw, Type, Smile, ArrowUp, ArrowDown, Crop, Undo, Redo } from 'lucide-react';
 import { Stage, Layer, Image as KonvaImage, Rect, Transformer, Group, Text as KonvaText } from 'react-konva';
 import Konva from 'konva';
 import { usePageCache } from '../hooks/usePageCache';
@@ -66,6 +66,13 @@ interface StickerElement {
   height: number;
   rotation: number;
   zIndex: number;
+}
+
+// Estado del editor para historial completo
+interface EditorState {
+  photos: Photo[];
+  texts: TextElement[];
+  stickers: StickerElement[];
 }
 
 // Cargar stickers con sintaxis actualizada para evitar warnings de Vite
@@ -817,7 +824,8 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
   const [stageSize, setStageSize] = useState({ width: 1000, height: 800 });
-  const [history, setHistory] = useState<Photo[][]>([initialPhotos]);
+  const [history, setHistory] = useState<EditorState[]>([{ photos: initialPhotos, texts: [], stickers: [] }]);
+  const [historyIndex, setHistoryIndex] = useState(0);
   const [stagePosition, setStagePosition] = useState<{ x: number; y: number } | null>(null);
   const [isLoadingCache, setIsLoadingCache] = useState(true);
   const [clipboard, setClipboard] = useState<Photo | null>(null);
@@ -832,6 +840,15 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   // Estados para textos y stickers
   const [texts, setTexts] = useState<TextElement[]>([]);
   const [stickers, setStickers] = useState<StickerElement[]>([]);
+  
+  // Refs para rastrear valores actuales (para undo/redo)
+  const photosRef = useRef<Photo[]>(photos);
+  const textsRef = useRef<TextElement[]>([]);
+  const stickersRef = useRef<StickerElement[]>([]);
+  const historyIndexRef = useRef<number>(0);
+  const isUndoRedoRef = useRef<boolean>(false);
+  const debounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
   const [showTextModal, setShowTextModal] = useState(false);
   const [showStickerModal, setShowStickerModal] = useState(false);
   const [newText, setNewText] = useState('');
@@ -951,6 +968,32 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     initBraveCompatibility();
   }, []); // Solo ejecutar una vez al montar
 
+  // Sincronizar refs con estados para undo/redo
+  useEffect(() => {
+    photosRef.current = photos;
+  }, [photos]);
+  
+  useEffect(() => {
+    textsRef.current = texts;
+  }, [texts]);
+  
+  useEffect(() => {
+    stickersRef.current = stickers;
+  }, [stickers]);
+  
+  useEffect(() => {
+    historyIndexRef.current = historyIndex;
+  }, [historyIndex]);
+
+  // Limpiar debounce timeout cuando el componente se desmonta
+  useEffect(() => {
+    return () => {
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+      }
+    };
+  }, []);
+
   // Cargar datos del caché cuando el componente se monta
   // IndexedDB es LOCAL en el navegador, así que si se cae el wifi,
   // siempre carga el último estado guardado (no se pierde nada)
@@ -1041,9 +1084,11 @@ export const PageEditor: React.FC<PageEditorProps> = ({
         
         setPhotos(cached.photos);
         setPhotoCount(cached.photoCount);
-        setHistory([cached.photos]);
         
         // Restaurar textos y stickers si existen
+        const restoredTexts = cached.texts || [];
+        const restoredStickers = cached.stickers || [];
+        
         if (cached.texts) {
           console.log('🔥 Restaurando textos desde caché:', cached.texts);
           setTexts(cached.texts);
@@ -1052,6 +1097,14 @@ export const PageEditor: React.FC<PageEditorProps> = ({
           console.log('🔥 Restaurando stickers desde caché:', cached.stickers);
           setStickers(cached.stickers);
         }
+        
+        // Inicializar history con el estado cargado
+        setHistory([{ 
+          photos: cached.photos, 
+          texts: restoredTexts, 
+          stickers: restoredStickers 
+        }]);
+        setHistoryIndex(0);
         
         // Restaurar posición del Stage y zoom
         if (cached.stageX !== undefined && cached.stageY !== undefined) {
@@ -1075,7 +1128,8 @@ export const PageEditor: React.FC<PageEditorProps> = ({
         }
         // Limpiar fotos anteriores del caché cuando se cambia el layout
         setPhotos([]);
-        setHistory([[]]);
+        setHistory([{ photos: [], texts: [], stickers: [] }]);
+        setHistoryIndex(0);
       } else if (hasNewPhotoCount || hasNewLayoutId) {
         console.log('✅ RAMA 3: Nueva página sin caché - usando valores iniciales');
         // Nueva página sin caché - usar valores iniciales
@@ -1257,8 +1311,41 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     }
   }, [TOTAL_CANVAS_WIDTH, TOTAL_CANVAS_HEIGHT, zoom, stageSize, isLoadingCache]);
 
-  const pushHistory = useCallback((nextPhotos: Photo[]) => {
-    setHistory((prev) => [...prev.slice(-19), nextPhotos]);
+  const pushHistory = useCallback(() => {
+    // No guardar historial si estamos en medio de undo/redo
+    if (isUndoRedoRef.current) return;
+    
+    // Cancelar timeout anterior (debounce)
+    if (debounceTimeoutRef.current) {
+      clearTimeout(debounceTimeoutRef.current);
+    }
+    
+    // Establecer nuevo timeout para guardar
+    debounceTimeoutRef.current = setTimeout(() => {
+      // Crear el nuevo estado usando refs (valores actuales)
+      const newState: EditorState = {
+        photos: [...photosRef.current],
+        texts: [...textsRef.current],
+        stickers: [...stickersRef.current]
+      };
+      
+      const currentIndex = historyIndexRef.current;
+      
+      setHistory((prev) => {
+        // Eliminar estados futuros si estamos en medio del historial
+        const trimmed = prev.slice(0, currentIndex + 1);
+        // Agregar nuevo estado y mantener últimos 50
+        const updated = [...trimmed, newState].slice(-50);
+        
+        // Calcular y establecer el nuevo índice (último elemento)
+        const newIndex = updated.length - 1;
+        setHistoryIndex(newIndex);
+        
+        return updated;
+      });
+      
+      debounceTimeoutRef.current = null;
+    }, 500); // Esperar 500ms sin más cambios
   }, []);
 
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1324,11 +1411,12 @@ export const PageEditor: React.FC<PageEditorProps> = ({
 
           setPhotos((prev) => {
             const next = [...prev, nextPhoto];
-            pushHistory(next);
             return next;
           });
           setSelectedId(nextPhoto.id);
           setHasUnsavedChanges(true); // Marcar cambios al cargar imagen
+          // Guardar en historial después de que React actualice el estado
+          setTimeout(() => pushHistory(), 0);
         };
       };
       reader.readAsDataURL(file as Blob);
@@ -1346,7 +1434,8 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     setPhotos([]);
     setTexts([]);
     setStickers([]);
-    setHistory([[]]);
+    setHistory([{ photos: [], texts: [], stickers: [] }]);
+    setHistoryIndex(0);
     setSelectedId(null);
     setClipboard(null);
     setBackgroundColor('#D4AF37'); // Resetear marco exterior (borde para el usuario)
@@ -1407,6 +1496,11 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     setShadowBlur(8);
     setShadowOffsetX(3);
     setShadowOffsetY(3);
+    setHasUnsavedChanges(true);
+    // Guardar en historial después de que React actualice el estado
+    setTimeout(() => pushHistory(), 0);
+    setShadowOffsetX(3);
+    setShadowOffsetY(3);
     setShowTextModal(false);
     setHasUnsavedChanges(true);
   };
@@ -1462,6 +1556,8 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     setShowEditTextModal(false);
     setEditingTextId(null);
     setHasUnsavedChanges(true);
+    // Guardar en historial después de que React actualice el estado
+    setTimeout(() => pushHistory(), 0);
   };
 
   // Funciones para agregar stickers
@@ -1481,6 +1577,8 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     setSelectedId(newSticker.id); // Seleccionar automáticamente el sticker recién agregado
     setShowStickerModal(false);
     setHasUnsavedChanges(true);
+    // Guardar en historial después de que React actualice el estado
+    setTimeout(() => pushHistory(), 0);
   };
 
   const handleDuplicate = () => {
@@ -1499,9 +1597,10 @@ export const PageEditor: React.FC<PageEditorProps> = ({
       };
 
       const next = [...prev, copy];
-      pushHistory(next);
       setSelectedId(copy.id);
       setHasUnsavedChanges(true);
+      // Guardar en historial después de que React actualice el estado
+      setTimeout(() => pushHistory(), 0);
       return next;
     });
   };
@@ -1527,8 +1626,9 @@ export const PageEditor: React.FC<PageEditorProps> = ({
 
     setPhotos((prev) => {
       const next = [...prev, copy];
-      pushHistory(next);
       setSelectedId(copy.id);
+      // Guardar en historial después de que React actualice el estado
+      setTimeout(() => pushHistory(), 0);
       return next;
     });
   };
@@ -1544,16 +1644,21 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     if (isPhoto) {
       setPhotos((prev) => {
         const next = prev.filter((p) => p.id !== selectedId);
-        pushHistory(next);
         setHasUnsavedChanges(true);
+        // Guardar en historial después de que React actualice el estado
+        setTimeout(() => pushHistory(), 0);
         return next;
       });
     } else if (isText) {
       setTexts((prev) => prev.filter((t) => t.id !== selectedId));
       setHasUnsavedChanges(true);
+      // Guardar en historial después de que React actualice el estado
+      setTimeout(() => pushHistory(), 0);
     } else if (isSticker) {
       setStickers((prev) => prev.filter((s) => s.id !== selectedId));
       setHasUnsavedChanges(true);
+      // Guardar en historial después de que React actualice el estado
+      setTimeout(() => pushHistory(), 0);
     }
     
     setSelectedId(null);
@@ -1605,8 +1710,9 @@ export const PageEditor: React.FC<PageEditorProps> = ({
         return photo;
       });
       
-      pushHistory(next);
       setHasUnsavedChanges(true);
+      // Guardar en historial después de que React actualice el estado
+      setTimeout(() => pushHistory(), 0);
       return next;
     });
     
@@ -1768,11 +1874,63 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   };
 
   const handleUndo = () => {
-    if (history.length <= 1) return;
-    const nextHistory = history.slice(0, -1);
-    setHistory(nextHistory);
-    setPhotos(nextHistory[nextHistory.length - 1] || []);
+    if (historyIndex <= 0) return;
+    
+    // Cancelar debounce para evitar guardar durante undo
+    if (debounceTimeoutRef.current) {
+      clearTimeout(debounceTimeoutRef.current);
+      debounceTimeoutRef.current = null;
+    }
+    
+    isUndoRedoRef.current = true;
+    const newIndex = historyIndex - 1;
+    const state = history[newIndex];
+    if (!state) {
+      isUndoRedoRef.current = false;
+      return;
+    }
+    
+    setHistoryIndex(newIndex);
+    setPhotos(state.photos || []);
+    setTexts(state.texts || []);
+    setStickers(state.stickers || []);
     setSelectedId(null);
+    setHasUnsavedChanges(true);
+    
+    // Restablecer flag después de que los estados se actualicen
+    setTimeout(() => {
+      isUndoRedoRef.current = false;
+    }, 10);
+  };
+
+  const handleRedo = () => {
+    if (historyIndex >= history.length - 1) return;
+    
+    // Cancelar debounce para evitar guardar durante redo
+    if (debounceTimeoutRef.current) {
+      clearTimeout(debounceTimeoutRef.current);
+      debounceTimeoutRef.current = null;
+    }
+    
+    isUndoRedoRef.current = true;
+    const newIndex = historyIndex + 1;
+    const state = history[newIndex];
+    if (!state) {
+      isUndoRedoRef.current = false;
+      return;
+    }
+    
+    setHistoryIndex(newIndex);
+    setPhotos(state.photos || []);
+    setTexts(state.texts || []);
+    setStickers(state.stickers || []);
+    setSelectedId(null);
+    setHasUnsavedChanges(true);
+    
+    // Restablecer flag después de que los estados se actualicen
+    setTimeout(() => {
+      isUndoRedoRef.current = false;
+    }, 10);
   };
 
   // Función para guardar manualmente la preview
@@ -2080,9 +2238,16 @@ export const PageEditor: React.FC<PageEditorProps> = ({
       }
 
       // Ctrl+Z - Deshacer
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
         e.preventDefault();
         handleUndo();
+        return;
+      }
+
+      // Ctrl+Y or Ctrl+Shift+Z - Rehacer
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        handleRedo();
         return;
       }
 
@@ -2281,6 +2446,32 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                 </p>
               )}
             </div>
+            <div className="flex items-center justify-start gap-2 mt-2">
+              <button
+                onClick={handleUndo}
+                disabled={historyIndex <= 0}
+                className={`w-8 h-8 rounded border flex items-center justify-center ${
+                  historyIndex <= 0
+                    ? 'border-gray-600 text-gray-600 cursor-not-allowed'
+                    : 'border-[#39FF14] text-[#39FF14] hover:bg-[#39FF14] hover:bg-opacity-10'
+                }`}
+                title="Deshacer (Ctrl+Z)"
+              >
+                <Undo size={16} />
+              </button>
+              <button
+                onClick={handleRedo}
+                disabled={historyIndex >= history.length - 1}
+                className={`w-8 h-8 rounded border flex items-center justify-center ${
+                  historyIndex >= history.length - 1
+                    ? 'border-gray-600 text-gray-600 cursor-not-allowed'
+                    : 'border-[#39FF14] text-[#39FF14] hover:bg-[#39FF14] hover:bg-opacity-10'
+                }`}
+                title="Rehacer (Ctrl+Y)"
+              >
+                <Redo size={16} />
+              </button>
+            </div>
           </div>
           <div className="text-center">
             <h1 className="text-2xl font-bausch text-[#39FF14]">PARTY CLASS</h1>
@@ -2346,13 +2537,12 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                       setHasUnsavedChanges(true);
                     }}
                     onCommitChange={(attrs) => {
-                      setPhotos((prev) => {
-                        const next = prev.map((p) =>
+                      setPhotos((prev) =>
+                        prev.map((p) =>
                           p.id === overflowPhoto.id ? { ...p, ...attrs } : p
-                        );
-                        pushHistory(next);
-                        return next;
-                      });
+                        )
+                      );
+                      setTimeout(() => pushHistory(), 0);
                       setHasUnsavedChanges(true);
                     }}
                     opacity={overflowPhoto.id === selectedId ? 0.5 : 0.28}
@@ -2396,14 +2586,15 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                             p.id === photo.id ? { ...p, ...attrs } : p
                           )
                         );
+                        setTimeout(() => pushHistory(), 0);
                         setHasUnsavedChanges(true);
                       }}
                       onDragEnd={() => {
-                        pushHistory(photos);
+                        setTimeout(() => pushHistory(), 0);
                         setHasUnsavedChanges(true);
                       }}
                       onTransformEnd={() => {
-                        pushHistory(photos);
+                        setTimeout(() => pushHistory(), 0);
                         setHasUnsavedChanges(true);
                       }}
                     />
@@ -2606,8 +2797,14 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                       );
                       setHasUnsavedChanges(true);
                     }}
-                    onDragEnd={() => setHasUnsavedChanges(true)}
-                    onTransformEnd={() => setHasUnsavedChanges(true)}
+                    onDragEnd={() => {
+                      setTimeout(() => pushHistory(), 0);
+                      setHasUnsavedChanges(true);
+                    }}
+                    onTransformEnd={() => {
+                      setTimeout(() => pushHistory(), 0);
+                      setHasUnsavedChanges(true);
+                    }}
                   />
                 ))}
               
@@ -2629,8 +2826,14 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                       );
                       setHasUnsavedChanges(true);
                     }}
-                    onDragEnd={() => setHasUnsavedChanges(true)}
-                    onTransformEnd={() => setHasUnsavedChanges(true)}
+                    onDragEnd={() => {
+                      setTimeout(() => pushHistory(), 0);
+                      setHasUnsavedChanges(true);
+                    }}
+                    onTransformEnd={() => {
+                      setTimeout(() => pushHistory(), 0);
+                      setHasUnsavedChanges(true);
+                    }}
                   />
                 ))}
 
@@ -2703,7 +2906,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                           p.id === photo.id ? { ...p, ...newAttrs } : p
                         )
                       );
-                      pushHistory(photos);
+                      setTimeout(() => pushHistory(), 0);
                       setHasUnsavedChanges(true);
                     }}
                     onDragMove={(e) => {
@@ -2730,7 +2933,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                           p.id === photo.id ? { ...p, ...newAttrs } : p
                         )
                       );
-                      pushHistory(photos);
+                      setTimeout(() => pushHistory(), 0);
                       setHasUnsavedChanges(true);
                     }}
                   />
