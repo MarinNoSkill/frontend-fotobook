@@ -30,6 +30,11 @@ interface Photo {
   height: number;
   rotation: number;
   zIndex: number;
+  // Filtros de imagen
+  opacity?: number;
+  brightness?: number;
+  contrast?: number;
+  saturation?: number;
 }
 
 interface TextElement {
@@ -40,6 +45,14 @@ interface TextElement {
   fontSize: number;
   fontFamily: string;
   fill: string;
+  strokeEnabled?: boolean;
+  stroke?: string;
+  strokeWidth?: number;
+  shadowEnabled?: boolean;
+  shadowColor?: string;
+  shadowBlur?: number;
+  shadowOffsetX?: number;
+  shadowOffsetY?: number;
   rotation: number;
   zIndex: number;
 }
@@ -81,6 +94,47 @@ const PhotoImage: React.FC<{
     }
   }, [isSelected]);
 
+  // Aplicar filtros de Konva solo cuando realmente hay filtros activos
+  useEffect(() => {
+    if (!imageRef.current || !image) return;
+
+    const node = imageRef.current;
+    const hasBrightness = photo.brightness !== undefined && photo.brightness !== 0;
+    const hasContrast = photo.contrast !== undefined && photo.contrast !== 0;
+    const hasSaturation = photo.saturation !== undefined && photo.saturation !== 0;
+    
+    // Solo aplicar filtros si hay al menos uno activo
+    const hasAnyFilter = hasBrightness || hasContrast || hasSaturation;
+
+    if (hasAnyFilter) {
+      const filters = [];
+
+      if (hasBrightness) {
+        filters.push(Konva.Filters.Brighten);
+        node.brightness(photo.brightness);
+      }
+
+      if (hasContrast) {
+        filters.push(Konva.Filters.Contrast);
+        node.contrast(photo.contrast);
+      }
+
+      if (hasSaturation) {
+        filters.push(Konva.Filters.HSL);
+        node.saturation(photo.saturation);
+      }
+
+      node.filters(filters);
+      node.cache();
+      node.getLayer()?.batchDraw();
+    } else {
+      // Sin filtros activos, limpiar y mostrar imagen normal
+      node.filters([]);
+      node.clearCache();
+      node.getLayer()?.batchDraw();
+    }
+  }, [photo.brightness, photo.contrast, photo.saturation, image]);
+
   return (
     <>
       <KonvaImage
@@ -91,6 +145,7 @@ const PhotoImage: React.FC<{
         width={photo.width}
         height={photo.height}
         rotation={photo.rotation}
+        opacity={photo.opacity !== undefined ? photo.opacity : 1}
         draggable
         onClick={onSelect}
         onTap={onSelect}
@@ -103,6 +158,13 @@ const PhotoImage: React.FC<{
           if (imageRef.current?.getStage()) {
             imageRef.current.getStage()!.container().style.cursor = 'default';
           }
+        }}
+        onDragMove={(e) => {
+          const node = e.target;
+          onChange({
+            x: node.x(),
+            y: node.y(),
+          });
         }}
         onDragEnd={(e) => {
           const node = e.target;
@@ -229,6 +291,205 @@ const PhotoImage: React.FC<{
   );
 };
 
+// Muestra la parte de la foto que queda fuera del lienzo total con menor opacidad.
+const SelectedPhotoOverflowHint: React.FC<{
+  photo: Photo;
+  borderSize: number;
+  totalCanvasWidth: number;
+  totalCanvasHeight: number;
+  isSelected: boolean;
+  onSelect: () => void;
+  onLiveChange: (attrs: Partial<Photo>) => void;
+  onCommitChange: (attrs: Partial<Photo>) => void;
+  opacity?: number;
+}> = ({
+  photo,
+  borderSize,
+  totalCanvasWidth,
+  totalCanvasHeight,
+  isSelected,
+  onSelect,
+  onLiveChange,
+  onCommitChange,
+  opacity = 0.35,
+}) => {
+  const imageRef = useRef<Konva.Image>(null);
+  const transformerRef = useRef<Konva.Transformer>(null);
+  const [image] = useImageLoader(photo.src);
+
+  useEffect(() => {
+    if (isSelected && transformerRef.current && imageRef.current) {
+      transformerRef.current.nodes([imageRef.current]);
+      transformerRef.current.getLayer()?.batchDraw();
+    }
+  }, [isSelected, photo.id]);
+
+  if (!image) {
+    return null;
+  }
+
+  const absoluteX = photo.x + borderSize;
+  const absoluteY = photo.y + borderSize;
+
+  return (
+    <>
+      <KonvaImage
+        ref={imageRef}
+        image={image}
+        x={absoluteX}
+        y={absoluteY}
+        width={photo.width}
+        height={photo.height}
+        rotation={photo.rotation}
+        opacity={opacity}
+        draggable={isSelected}
+        onClick={onSelect}
+        onTap={onSelect}
+        onMouseEnter={(e) => {
+          const stage = e.target.getStage();
+          if (stage) {
+            stage.container().style.cursor = 'move';
+          }
+        }}
+        onMouseLeave={(e) => {
+          const stage = e.target.getStage();
+          if (stage) {
+            stage.container().style.cursor = 'default';
+          }
+        }}
+        onDragMove={(e) => {
+          const node = e.target;
+          onLiveChange({
+            x: node.x() - borderSize,
+            y: node.y() - borderSize,
+          });
+        }}
+        onDragEnd={(e) => {
+          const node = e.target;
+          onCommitChange({
+            x: node.x() - borderSize,
+            y: node.y() - borderSize,
+          });
+        }}
+        onTransform={(e) => {
+          const node = e.target as Konva.Image;
+          const scaleX = node.scaleX();
+          const scaleY = node.scaleY();
+          
+          // Capturar posición antes de resetear escala
+          const nodeX = node.x();
+          const nodeY = node.y();
+
+          // Resetear escala
+          node.scaleX(1);
+          node.scaleY(1);
+          
+          // Calcular nuevas dimensiones
+          const newWidth = Math.max(5, photo.width * scaleX);
+          const newHeight = Math.max(5, photo.height * scaleY);
+          
+          // Aplicar nuevas dimensiones
+          node.width(newWidth);
+          node.height(newHeight);
+          
+          // Mantener la posición que Konva calculó
+          node.x(nodeX);
+          node.y(nodeY);
+
+          onLiveChange({
+            x: nodeX - borderSize,
+            y: nodeY - borderSize,
+            width: newWidth,
+            height: newHeight,
+            rotation: node.rotation(),
+          });
+        }}
+        onTransformEnd={(e) => {
+          const node = e.target as Konva.Image;
+          const scaleX = node.scaleX();
+          const scaleY = node.scaleY();
+          
+          // Capturar posición antes de resetear escala
+          const nodeX = node.x();
+          const nodeY = node.y();
+
+          // Resetear escala
+          node.scaleX(1);
+          node.scaleY(1);
+          
+          // Calcular nuevas dimensiones
+          const newWidth = Math.max(5, photo.width * scaleX);
+          const newHeight = Math.max(5, photo.height * scaleY);
+          
+          // Aplicar nuevas dimensiones
+          node.width(newWidth);
+          node.height(newHeight);
+          
+          // Mantener la posición que Konva calculó
+          node.x(nodeX);
+          node.y(nodeY);
+
+          onCommitChange({
+            x: nodeX - borderSize,
+            y: nodeY - borderSize,
+            width: newWidth,
+            height: newHeight,
+            rotation: node.rotation(),
+          });
+        }}
+        perfectDrawEnabled={false}
+      />
+
+      {isSelected && (
+        <Rect
+          x={absoluteX}
+          y={absoluteY}
+          width={photo.width}
+          height={photo.height}
+          rotation={photo.rotation}
+          stroke="#39FF14"
+          strokeWidth={2}
+          dash={[6, 4]}
+          listening={false}
+          perfectDrawEnabled={false}
+        />
+      )}
+
+      {isSelected && (
+        <Transformer
+          ref={transformerRef}
+          boundBoxFunc={(oldBox, newBox) => {
+            if (newBox.width < 5 || newBox.height < 5) {
+              return oldBox;
+            }
+            return newBox;
+          }}
+          borderStroke="#39FF14"
+          borderStrokeWidth={2}
+          anchorStroke="#39FF14"
+          anchorFill="#FFFFFF"
+          anchorSize={8}
+          rotateAnchorOffset={30}
+          ignoreStroke={true}
+          shouldOverdrawWholeArea={true}
+        />
+      )}
+
+      {/* Quita cualquier parte dentro del lienzo para que solo se vea en el fondo gris */}
+      <Rect
+        x={0}
+        y={0}
+        width={totalCanvasWidth}
+        height={totalCanvasHeight}
+        fill="#000000"
+        globalCompositeOperation="destination-out"
+        listening={false}
+        perfectDrawEnabled={false}
+      />
+    </>
+  );
+};
+
 // Hook para cargar imágenes
 function useImageLoader(src: string) {
   const [image, setImage] = useState<HTMLImageElement | undefined>();
@@ -254,10 +515,7 @@ const TextElementComponent: React.FC<{
   onChange: (attrs: Partial<TextElement>) => void;
   onDragEnd: () => void;
   onTransformEnd: () => void;
-  borderSize: number;
-  pageWidth: number;
-  pageHeight: number;
-}> = ({ text, isSelected, onSelect, onDoubleClick, onChange, onDragEnd, onTransformEnd, borderSize, pageWidth, pageHeight }) => {
+}> = ({ text, isSelected, onSelect, onDoubleClick, onChange, onDragEnd, onTransformEnd }) => {
   const textRef = useRef<Konva.Text>(null);
   const trRef = useRef<Konva.Transformer>(null);
 
@@ -266,22 +524,10 @@ const TextElementComponent: React.FC<{
       trRef.current.nodes([textRef.current]);
       trRef.current.getLayer()?.batchDraw();
     }
-  }, [isSelected]);
+  }, [isSelected, text.text, text.fontSize, text.rotation, text.strokeEnabled, text.strokeWidth]);
 
-  const handleDragMove = (e: Konva.KonvaEventObject<DragEvent>) => {
-    const node = e.target;
-    const textWidth = node.width() * node.scaleX();
-    const textHeight = node.height() * node.scaleY();
-    
-    // Restricciones de bordes - permitir acercarse mucho más al borde
-    const margin = borderSize / 4; // Margen reducido para texto
-    const minX = margin;
-    const minY = margin;
-    const maxX = pageWidth - margin - textWidth;
-    const maxY = pageHeight - margin - textHeight;
-
-    node.x(Math.max(minX, Math.min(node.x(), maxX)));
-    node.y(Math.max(minY, Math.min(node.y(), maxY)));
+  const handleDragMove = () => {
+    // Movimiento libre como stickers - sin restricciones
   };
 
   return (
@@ -294,6 +540,13 @@ const TextElementComponent: React.FC<{
         fontSize={text.fontSize}
         fontFamily={text.fontFamily}
         fill={text.fill}
+        stroke={text.strokeEnabled ? (text.stroke || '#FFFFFF') : undefined}
+        strokeWidth={text.strokeEnabled ? (text.strokeWidth || 0) : 0}
+        shadowColor={text.shadowEnabled ? (text.shadowColor || '#000000') : undefined}
+        shadowBlur={text.shadowEnabled ? (text.shadowBlur || 0) : 0}
+        shadowOffsetX={text.shadowEnabled ? (text.shadowOffsetX || 0) : 0}
+        shadowOffsetY={text.shadowEnabled ? (text.shadowOffsetY || 0) : 0}
+        shadowOpacity={text.shadowEnabled ? 0.75 : 0}
         rotation={text.rotation}
         draggable
         onClick={onSelect}
@@ -311,13 +564,36 @@ const TextElementComponent: React.FC<{
         }}
         onTransformEnd={(e) => {
           const node = e.target as Konva.Text;
-          const scaleX = node.scaleX();
-          
-          onChange({
-            fontSize: text.fontSize * scaleX,
+          const scale = Math.max(node.scaleX(), node.scaleY());
+
+          const newFontSize = Math.max(4, text.fontSize * scale);
+          const nextAttrs: Partial<TextElement> = {
+            fontSize: newFontSize,
             rotation: node.rotation(),
-          });
-          
+          };
+
+          // Mantener borde y sombra proporcionales al tamaño del texto.
+          if (text.strokeEnabled && typeof text.strokeWidth === 'number') {
+            const newStrokeWidth = Math.max(1, text.strokeWidth * scale);
+            // Limitar strokeWidth según el nuevo fontSize
+            const maxStroke = getMaxStrokeWidth(newFontSize);
+            nextAttrs.strokeWidth = Math.min(newStrokeWidth, maxStroke);
+          }
+
+          if (text.shadowEnabled) {
+            if (typeof text.shadowBlur === 'number') {
+              nextAttrs.shadowBlur = Math.max(0, text.shadowBlur * scale);
+            }
+            if (typeof text.shadowOffsetX === 'number') {
+              nextAttrs.shadowOffsetX = text.shadowOffsetX * scale;
+            }
+            if (typeof text.shadowOffsetY === 'number') {
+              nextAttrs.shadowOffsetY = text.shadowOffsetY * scale;
+            }
+          }
+
+          onChange(nextAttrs);
+
           node.scaleX(1);
           node.scaleY(1);
           onTransformEnd();
@@ -338,8 +614,10 @@ const TextElementComponent: React.FC<{
           anchorFill="#FFFFFF"
           anchorSize={8}
           rotateAnchorOffset={30}
-          ignoreStroke={true}
+          ignoreStroke={false}
           shouldOverdrawWholeArea={true}
+          onDblClick={onDoubleClick}
+          onDblTap={onDoubleClick}
         />
       )}
     </>
@@ -496,6 +774,15 @@ export function distributePhotosInGrid(photoCount: number, canvasWidth: number, 
   return positions;
 }
 
+// Función helper para calcular el máximo strokeWidth según el fontSize
+const getMaxStrokeWidth = (fontSize: number): number => {
+  if (fontSize < 15) return 1;
+  if (fontSize < 33) return 1;
+  if (fontSize < 50) return 2;
+  if (fontSize < 300) return 3;
+  return 4;
+};
+
 export const PageEditor: React.FC<PageEditorProps> = ({
   pageId,
   onBack,
@@ -551,6 +838,14 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   const [selectedFont, setSelectedFont] = useState('Arial');
   const [selectedFontSize, setSelectedFontSize] = useState(32);
   const [selectedTextColor, setSelectedTextColor] = useState('#000000');
+  const [strokeEnabled, setStrokeEnabled] = useState(false);
+  const [strokeColor, setStrokeColor] = useState('#FFFFFF');
+  const [strokeWidth, setStrokeWidth] = useState(2);
+  const [shadowEnabled, setShadowEnabled] = useState(false);
+  const [shadowColor, setShadowColor] = useState('#000000');
+  const [shadowBlur, setShadowBlur] = useState(8);
+  const [shadowOffsetX, setShadowOffsetX] = useState(3);
+  const [shadowOffsetY, setShadowOffsetY] = useState(3);
   
   // Estados para editar texto existente
   const [showEditTextModal, setShowEditTextModal] = useState(false);
@@ -559,6 +854,14 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   const [editFont, setEditFont] = useState('Arial');
   const [editFontSize, setEditFontSize] = useState(32);
   const [editTextColor, setEditTextColor] = useState('#000000');
+  const [editStrokeEnabled, setEditStrokeEnabled] = useState(false);
+  const [editStrokeColor, setEditStrokeColor] = useState('#FFFFFF');
+  const [editStrokeWidth, setEditStrokeWidth] = useState(2);
+  const [editShadowEnabled, setEditShadowEnabled] = useState(false);
+  const [editShadowColor, setEditShadowColor] = useState('#000000');
+  const [editShadowBlur, setEditShadowBlur] = useState(8);
+  const [editShadowOffsetX, setEditShadowOffsetX] = useState(3);
+  const [editShadowOffsetY, setEditShadowOffsetY] = useState(3);
   
   // Estados para modal de recorte de imágenes
   const [showCropModal, setShowCropModal] = useState(false);
@@ -602,6 +905,24 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   }, [layoutId, photoCount, BORDER_SIZE]);
   
   const layoutPositions = selectedLayout ? selectedLayout.positions : [];
+
+  const overflowPhotos = useMemo(() => {
+    return photos.filter((photo) => {
+      const absoluteX = photo.x + BORDER_SIZE;
+      const absoluteY = photo.y + BORDER_SIZE;
+
+      return (
+        absoluteX < 0 ||
+        absoluteY < 0 ||
+        absoluteX + photo.width > TOTAL_CANVAS_WIDTH ||
+        absoluteY + photo.height > TOTAL_CANVAS_HEIGHT
+      );
+    });
+  }, [photos, BORDER_SIZE, TOTAL_CANVAS_WIDTH, TOTAL_CANVAS_HEIGHT]);
+
+  const overflowPhotoIdSet = useMemo(() => {
+    return new Set(overflowPhotos.map((photo) => photo.id));
+  }, [overflowPhotos]);
 
   console.log('📊 PageEditor: Layout calculado', {
     photoCount,
@@ -1063,6 +1384,14 @@ export const PageEditor: React.FC<PageEditorProps> = ({
       fontSize: selectedFontSize,
       fontFamily: selectedFont,
       fill: selectedTextColor,
+      strokeEnabled,
+      stroke: strokeColor,
+      strokeWidth,
+      shadowEnabled,
+      shadowColor,
+      shadowBlur,
+      shadowOffsetX,
+      shadowOffsetY,
       rotation: 0,
       zIndex: photos.length + texts.length + stickers.length,
     };
@@ -1070,6 +1399,14 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     setTexts((prev) => [...prev, newTextElement]);
     setSelectedId(newTextElement.id); // Seleccionar automáticamente el texto recién agregado
     setNewText('');
+    setStrokeEnabled(false);
+    setStrokeColor('#FFFFFF');
+    setStrokeWidth(2);
+    setShadowEnabled(false);
+    setShadowColor('#000000');
+    setShadowBlur(8);
+    setShadowOffsetX(3);
+    setShadowOffsetY(3);
     setShowTextModal(false);
     setHasUnsavedChanges(true);
   };
@@ -1084,6 +1421,16 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     setEditFont(textToEdit.fontFamily);
     setEditFontSize(textToEdit.fontSize);
     setEditTextColor(textToEdit.fill);
+    setEditStrokeEnabled(Boolean(textToEdit.strokeEnabled));
+    setEditStrokeColor(textToEdit.stroke || '#FFFFFF');
+    // Limitar strokeWidth según el tamaño del texto
+    const maxStroke = getMaxStrokeWidth(textToEdit.fontSize);
+    setEditStrokeWidth(Math.min(textToEdit.strokeWidth || 2, maxStroke));
+    setEditShadowEnabled(Boolean(textToEdit.shadowEnabled));
+    setEditShadowColor(textToEdit.shadowColor || '#000000');
+    setEditShadowBlur(textToEdit.shadowBlur || 8);
+    setEditShadowOffsetX(textToEdit.shadowOffsetX || 3);
+    setEditShadowOffsetY(textToEdit.shadowOffsetY || 3);
     setShowEditTextModal(true);
   };
   
@@ -1093,7 +1440,21 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     setTexts((prev) =>
       prev.map((t) =>
         t.id === editingTextId
-          ? { ...t, text: editText.trim(), fontFamily: editFont, fontSize: editFontSize, fill: editTextColor }
+          ? {
+              ...t,
+              text: editText.trim(),
+              fontFamily: editFont,
+              fontSize: editFontSize,
+              fill: editTextColor,
+              strokeEnabled: editStrokeEnabled,
+              stroke: editStrokeColor,
+              strokeWidth: editStrokeWidth,
+              shadowEnabled: editShadowEnabled,
+              shadowColor: editShadowColor,
+              shadowBlur: editShadowBlur,
+              shadowOffsetX: editShadowOffsetX,
+              shadowOffsetY: editShadowOffsetY,
+            }
           : t
       )
     );
@@ -1219,11 +1580,26 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     setPhotos((prev) => {
       const next = prev.map((photo) => {
         if (photo.id === cropImageId) {
+          const rawWidthRatio = cropInfo.sourceWidth > 0 ? cropInfo.width / cropInfo.sourceWidth : 1;
+          const rawHeightRatio = cropInfo.sourceHeight > 0 ? cropInfo.height / cropInfo.sourceHeight : 1;
+          const widthRatio = Math.max(0.01, Math.min(1, rawWidthRatio));
+          const heightRatio = Math.max(0.01, Math.min(1, rawHeightRatio));
+
+          const nextWidth = Math.max(1, photo.width * widthRatio);
+          const nextHeight = Math.max(1, photo.height * heightRatio);
+
+          // Mantener el centro visual para que el recorte no "mueva" la foto en la página.
+          const nextX = photo.x + (photo.width - nextWidth) / 2;
+          const nextY = photo.y + (photo.height - nextHeight) / 2;
+
           return {
             ...photo,
             src: croppedImageData,
-            width: cropInfo.canvasWidth,
-            height: cropInfo.canvasHeight,
+            // Mantener escala visual proporcional al área recortada, sin expandir a la página.
+            width: nextWidth,
+            height: nextHeight,
+            x: nextX,
+            y: nextY,
           };
         }
         return photo;
@@ -1809,6 +2185,69 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     }
   };
 
+  const buildOutlineShadow = (enabled: boolean, size: number, color: string) => {
+    if (!enabled || size <= 0) {
+      return '';
+    }
+
+    const offsets = [
+      [-1, 0],
+      [1, 0],
+      [0, -1],
+      [0, 1],
+      [-1, -1],
+      [1, -1],
+      [-1, 1],
+      [1, 1],
+    ];
+
+    return offsets
+      .map(([x, y]) => `${x * size}px ${y * size}px 0 ${color}`)
+      .join(', ');
+  };
+
+  const addOutlineShadow = buildOutlineShadow(strokeEnabled, strokeWidth, strokeColor);
+  const addDropShadow = shadowEnabled
+    ? `${shadowOffsetX}px ${shadowOffsetY}px ${shadowBlur}px ${shadowColor}`
+    : '';
+  const addCombinedShadow = [addOutlineShadow, addDropShadow].filter(Boolean).join(', ');
+
+  const editOutlineShadow = buildOutlineShadow(editStrokeEnabled, editStrokeWidth, editStrokeColor);
+  const editDropShadow = editShadowEnabled
+    ? `${editShadowOffsetX}px ${editShadowOffsetY}px ${editShadowBlur}px ${editShadowColor}`
+    : '';
+  const editCombinedShadow = [editOutlineShadow, editDropShadow].filter(Boolean).join(', ');
+
+  const addPreviewStyle: React.CSSProperties = {
+    fontFamily: selectedFont,
+    fontSize: `${selectedFontSize}px`,
+    color: selectedTextColor,
+    WebkitTextStroke: strokeEnabled ? `${strokeWidth}px ${strokeColor}` : undefined,
+    textShadow: addCombinedShadow || 'none',
+    lineHeight: 1.2,
+    textAlign: 'left',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    overflowWrap: 'anywhere',
+    backgroundColor: 'transparent',
+    resize: 'none',
+  };
+
+  const editPreviewStyle: React.CSSProperties = {
+    fontFamily: editFont,
+    fontSize: `${editFontSize}px`,
+    color: editTextColor,
+    WebkitTextStroke: editStrokeEnabled ? `${editStrokeWidth}px ${editStrokeColor}` : undefined,
+    textShadow: editCombinedShadow || 'none',
+    lineHeight: 1.2,
+    textAlign: 'left',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    overflowWrap: 'anywhere',
+    backgroundColor: 'transparent',
+    resize: 'none',
+  };
+
   return (
     <div className={`h-screen bg-white flex flex-col ${exitAnimation ? 'animate-zoomOut' : 'animate-zoomIn'}`}>
       {/* Header */}
@@ -1873,7 +2312,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
         {/* Canvas Area */}
         <div
           ref={containerRef}
-          className="flex-1 bg-[#F9FAFB] rounded-lg border-2 border-[#E5E7EB] overflow-hidden"
+          className="flex-1 bg-[#5F6B7A] rounded-lg border-2 border-[#7A8594] overflow-hidden"
         >
           <Stage
             ref={stageRef}
@@ -1886,6 +2325,42 @@ export const PageEditor: React.FC<PageEditorProps> = ({
             scaleX={zoom}
             scaleY={zoom}
           >
+            {/* Capa separada para hint de overflow fuera del lienzo (debajo del contenido principal) */}
+            {overflowPhotos.length > 0 && (
+              <Layer>
+                {overflowPhotos.map((overflowPhoto) => (
+                  <SelectedPhotoOverflowHint
+                    key={`overflow-hint-${overflowPhoto.id}`}
+                    photo={overflowPhoto}
+                    borderSize={BORDER_SIZE}
+                    totalCanvasWidth={TOTAL_CANVAS_WIDTH}
+                    totalCanvasHeight={TOTAL_CANVAS_HEIGHT}
+                    isSelected={overflowPhoto.id === selectedId}
+                    onSelect={() => setSelectedId(overflowPhoto.id)}
+                    onLiveChange={(attrs) => {
+                      setPhotos((prev) =>
+                        prev.map((p) =>
+                          p.id === overflowPhoto.id ? { ...p, ...attrs } : p
+                        )
+                      );
+                      setHasUnsavedChanges(true);
+                    }}
+                    onCommitChange={(attrs) => {
+                      setPhotos((prev) => {
+                        const next = prev.map((p) =>
+                          p.id === overflowPhoto.id ? { ...p, ...attrs } : p
+                        );
+                        pushHistory(next);
+                        return next;
+                      });
+                      setHasUnsavedChanges(true);
+                    }}
+                    opacity={overflowPhoto.id === selectedId ? 0.5 : 0.28}
+                  />
+                ))}
+              </Layer>
+            )}
+
             <Layer ref={layerRef}>
               {/* FONDO AZUL completo */}
               <Rect
@@ -1937,83 +2412,139 @@ export const PageEditor: React.FC<PageEditorProps> = ({
 
               {/* LÍNEAS DORADAS que dividen según layout */}
               {layoutPositions.length > 1 && (() => {
-                // Algoritmo simplificado: generar líneas directamente del layout
+                // Generar líneas divisorias robustas y evitar micro-gaps por subpixel.
                 const lines: Array<{type: 'v' | 'h', x: number, y: number, width: number, height: number}> = [];
+                const EPS = 0.5;
+                const normalize = (n: number) => Math.round(n * 100) / 100;
+                const extendLineIntoFrame = (line: {type: 'v' | 'h', x: number, y: number, width: number, height: number}) => {
+                  if (line.type === 'v') {
+                    let y = line.y;
+                    let height = line.height;
+
+                    if (y <= EPS) {
+                      y -= BORDER_SIZE;
+                      height += BORDER_SIZE;
+                    }
+
+                    if (y + height >= PAGE_HEIGHT - EPS) {
+                      height += BORDER_SIZE;
+                    }
+
+                    return { ...line, y, height };
+                  }
+
+                  let x = line.x;
+                  let width = line.width;
+
+                  if (x <= EPS) {
+                    x -= BORDER_SIZE;
+                    width += BORDER_SIZE;
+                  }
+
+                  if (x + width >= PAGE_WIDTH - EPS) {
+                    width += BORDER_SIZE;
+                  }
+
+                  return { ...line, x, width };
+                };
+
+                const isAutoLayout = selectedLayout?.id.endsWith('-auto') ?? false;
                 
                 console.log('🎯 Calculando líneas divisorias:', {
                   BORDER_SIZE,
                   layoutPositions: layoutPositions.map(p => ({x: p.x, y: p.y, w: p.width, h: p.height}))
                 });
                 
-                // Encontrar todas las líneas verticales únicas
+                // Encontrar todas las líneas verticales/horizontales únicas
                 const verticalLines = new Set<number>();
-                layoutPositions.forEach(pos => {
-                  // Línea a la derecha de cada compartimento (si no está en el borde derecho)
-                  const rightEdge = pos.x + pos.width;
-                  if (rightEdge < PAGE_WIDTH) {
-                    verticalLines.add(rightEdge);
-                  }
-                });
-                
-                // Encontrar todas las líneas horizontales únicas
                 const horizontalLines = new Set<number>();
+
                 layoutPositions.forEach(pos => {
-                  // Línea abajo de cada compartimento (si no está en el borde inferior)
+                  const rightEdge = pos.x + pos.width;
                   const bottomEdge = pos.y + pos.height;
-                  if (bottomEdge < PAGE_HEIGHT) {
-                    horizontalLines.add(bottomEdge);
+
+                  const edgeX = isAutoLayout ? rightEdge : normalize(rightEdge);
+                  const edgeY = isAutoLayout ? bottomEdge : normalize(bottomEdge);
+
+                  if (rightEdge < PAGE_WIDTH - EPS) {
+                    verticalLines.add(edgeX);
+                  }
+                  if (bottomEdge < PAGE_HEIGHT - EPS) {
+                    horizontalLines.add(edgeY);
                   }
                 });
-                
-                // Crear líneas verticales
-                verticalLines.forEach(x => {
-                  // Encontrar el rango Y que esta línea debe cubrir
-                  let minY = PAGE_HEIGHT;
-                  let maxY = 0;
-                  
-                  layoutPositions.forEach(pos => {
-                    // Si esta posición está a la izquierda o derecha de la línea
-                    if ((pos.x + pos.width === x) || (pos.x === x + BORDER_SIZE)) {
-                      minY = Math.min(minY, pos.y);
-                      maxY = Math.max(maxY, pos.y + pos.height);
-                    }
-                  });
-                  
-                  if (minY < maxY) {
+
+                if (isAutoLayout) {
+                  // En auto-layout dibujar líneas completas para evitar segmentos quebrados.
+                  verticalLines.forEach((x) => {
                     lines.push({
                       type: 'v',
-                      x: x,
-                      y: minY,
+                      x,
+                      y: 0,
                       width: BORDER_SIZE,
-                      height: maxY - minY
+                      height: PAGE_HEIGHT,
                     });
-                  }
-                });
-                
-                // Crear líneas horizontales
-                horizontalLines.forEach(y => {
-                  // Encontrar el rango X que esta línea debe cubrir
-                  let minX = PAGE_WIDTH;
-                  let maxX = 0;
-                  
-                  layoutPositions.forEach(pos => {
-                    // Si esta posición está arriba o abajo de la línea
-                    if ((pos.y + pos.height === y) || (pos.y === y + BORDER_SIZE)) {
-                      minX = Math.min(minX, pos.x);
-                      maxX = Math.max(maxX, pos.x + pos.width);
-                    }
                   });
-                  
-                  if (minX < maxX) {
+
+                  horizontalLines.forEach((y) => {
                     lines.push({
                       type: 'h',
-                      x: minX,
-                      y: y,
-                      width: maxX - minX,
-                      height: BORDER_SIZE
+                      x: 0,
+                      y,
+                      width: PAGE_WIDTH,
+                      height: BORDER_SIZE,
                     });
-                  }
-                });
+                  });
+                } else {
+                  // Para layouts irregulares, mantener líneas segmentadas.
+                  verticalLines.forEach(x => {
+                    let minY = PAGE_HEIGHT;
+                    let maxY = 0;
+
+                    layoutPositions.forEach(pos => {
+                      const isLeftSide = Math.abs((pos.x + pos.width) - x) < EPS;
+                      const isRightSide = Math.abs(pos.x - (x + BORDER_SIZE)) < EPS;
+                      if (isLeftSide || isRightSide) {
+                        minY = Math.min(minY, pos.y);
+                        maxY = Math.max(maxY, pos.y + pos.height);
+                      }
+                    });
+
+                    if (minY < maxY) {
+                      lines.push({
+                        type: 'v',
+                        x,
+                        y: minY,
+                        width: BORDER_SIZE,
+                        height: maxY - minY,
+                      });
+                    }
+                  });
+
+                  horizontalLines.forEach(y => {
+                    let minX = PAGE_WIDTH;
+                    let maxX = 0;
+
+                    layoutPositions.forEach(pos => {
+                      const isTopSide = Math.abs((pos.y + pos.height) - y) < EPS;
+                      const isBottomSide = Math.abs(pos.y - (y + BORDER_SIZE)) < EPS;
+                      if (isTopSide || isBottomSide) {
+                        minX = Math.min(minX, pos.x);
+                        maxX = Math.max(maxX, pos.x + pos.width);
+                      }
+                    });
+
+                    if (minX < maxX) {
+                      lines.push({
+                        type: 'h',
+                        x: minX,
+                        y,
+                        width: maxX - minX,
+                        height: BORDER_SIZE,
+                      });
+                    }
+                  });
+                }
                 
                 console.log('🎯 Líneas generadas:', {
                   verticalLines: Array.from(verticalLines),
@@ -2021,17 +2552,20 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                   totalLines: lines.length,
                   lines: lines.map(l => ({type: l.type, x: l.x, y: l.y, w: l.width, h: l.height}))
                 });
+
+                const seamlessLines = lines.map(extendLineIntoFrame);
                 
                 return (
                   <Group x={BORDER_SIZE} y={BORDER_SIZE} listening={false}>
-                    {lines.map((line, idx) => (
+                    {seamlessLines.map((line, idx) => (
                       <Rect
                         key={`divider-${line.type}-${idx}-${BORDER_SIZE}`}
-                        x={line.x}
-                        y={line.y}
-                        width={line.width}
-                        height={line.height}
+                        x={isAutoLayout ? line.x : Math.floor(line.x)}
+                        y={isAutoLayout ? line.y : Math.floor(line.y)}
+                        width={isAutoLayout ? line.width : Math.ceil(line.width) + 1}
+                        height={isAutoLayout ? line.height : Math.ceil(line.height) + 1}
                         fill={backgroundColor}
+                        perfectDrawEnabled={false}
                         listening={false}
                       />
                     ))}
@@ -2052,8 +2586,8 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                   <Rect x={BORDER_SIZE + PAGE_WIDTH} y={0} width={BORDER_SIZE} height={TOTAL_CANVAS_HEIGHT} fill={backgroundColor} />
                 </Group>
               )}
-              
-              {/* Textos (sin clipping, pueden estar en todo el lienzo) */}
+
+              {/* Textos (sin clipping, movimiento libre como stickers) */}
               {texts
                 .slice()
                 .sort((a, b) => a.zIndex - b.zIndex)
@@ -2074,9 +2608,6 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                     }}
                     onDragEnd={() => setHasUnsavedChanges(true)}
                     onTransformEnd={() => setHasUnsavedChanges(true)}
-                    borderSize={BORDER_SIZE}
-                    pageWidth={PAGE_WIDTH}
-                    pageHeight={PAGE_HEIGHT}
                   />
                 ))}
               
@@ -2105,7 +2636,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
 
               {/* Transformers de FOTOS - fuera del clipping para que siempre sean visibles */}
               {selectedId && photos.map((photo) => 
-                photo.id === selectedId ? (
+                photo.id === selectedId && !overflowPhotoIdSet.has(photo.id) ? (
                   <Transformer
                     key={`photo-transformer-${photo.id}`}
                     x={photo.x + BORDER_SIZE}
@@ -2126,6 +2657,29 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                         return oldBox;
                       }
                       return newBox;
+                    }}
+                    onTransform={(e) => {
+                      const node = e.target;
+                      const scaleX = node.scaleX();
+                      const scaleY = node.scaleY();
+
+                      node.scaleX(1);
+                      node.scaleY(1);
+
+                      const newAttrs = {
+                        x: node.x() - BORDER_SIZE,
+                        y: node.y() - BORDER_SIZE,
+                        width: Math.max(5, photo.width * scaleX),
+                        height: Math.max(5, photo.height * scaleY),
+                        rotation: node.rotation(),
+                      };
+
+                      setPhotos((prev) =>
+                        prev.map((p) =>
+                          p.id === photo.id ? { ...p, ...newAttrs } : p
+                        )
+                      );
+                      setHasUnsavedChanges(true);
                     }}
                     onTransformEnd={(e) => {
                       const node = e.target;
@@ -2150,6 +2704,19 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                         )
                       );
                       pushHistory(photos);
+                      setHasUnsavedChanges(true);
+                    }}
+                    onDragMove={(e) => {
+                      const newAttrs = {
+                        x: e.target.x() - BORDER_SIZE,
+                        y: e.target.y() - BORDER_SIZE,
+                      };
+
+                      setPhotos((prev) =>
+                        prev.map((p) =>
+                          p.id === photo.id ? { ...p, ...newAttrs } : p
+                        )
+                      );
                       setHasUnsavedChanges(true);
                     }}
                     onDragEnd={(e) => {
@@ -2200,7 +2767,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-bebas text-gray-600 mb-1">
-                  Color de Bordes (Marcos entre fotos)
+                  EDITAR COLOR DE FONDO
                 </label>
                 <input
                   type="color"
@@ -2214,7 +2781,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
               </div>
               <div>
                 <label className="block text-xs font-bebas text-gray-600 mb-1">
-                  Color de Fondo (Marco exterior)
+                  EDITAR COLOR DE MARCO
                 </label>
                 <input
                   type="color"
@@ -2464,6 +3031,142 @@ export const PageEditor: React.FC<PageEditorProps> = ({
             </div>
           </div>
 
+          {/* Filtros de Imagen - Solo visible cuando una foto está seleccionada */}
+          {selectedId && photos.find(p => p.id === selectedId) && (() => {
+            const selectedPhoto = photos.find(p => p.id === selectedId)!;
+            return (
+              <div className="bg-white border-2 border-[#39FF14] rounded-lg p-4">
+                <label className="block text-sm font-bebas text-[#003300] mb-3">
+                  🎨 Filtros de Imagen
+                </label>
+                <div className="space-y-4">
+                  {/* Opacidad */}
+                  <div>
+                    <label className="block text-xs font-bebas text-gray-600 mb-1">
+                      Opacidad: {Math.round((selectedPhoto.opacity !== undefined ? selectedPhoto.opacity : 1) * 100)}%
+                    </label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={selectedPhoto.opacity !== undefined ? selectedPhoto.opacity : 1}
+                      onChange={(e) => {
+                        const newOpacity = Number(e.target.value);
+                        setPhotos((prev) =>
+                          prev.map((p) =>
+                            p.id === selectedId ? { ...p, opacity: newOpacity } : p
+                          )
+                        );
+                        setHasUnsavedChanges(true);
+                      }}
+                      className="w-full"
+                    />
+                  </div>
+
+                  {/* Brillo */}
+                  <div>
+                    <label className="block text-xs font-bebas text-gray-600 mb-1">
+                      Brillo: {selectedPhoto.brightness !== undefined ? selectedPhoto.brightness : 0}
+                    </label>
+                    <input
+                      type="range"
+                      min="-1"
+                      max="1"
+                      step="0.01"
+                      value={selectedPhoto.brightness !== undefined ? selectedPhoto.brightness : 0}
+                      onChange={(e) => {
+                        const newBrightness = Number(e.target.value);
+                        setPhotos((prev) =>
+                          prev.map((p) =>
+                            p.id === selectedId ? { ...p, brightness: newBrightness } : p
+                          )
+                        );
+                        setHasUnsavedChanges(true);
+                      }}
+                      className="w-full"
+                    />
+                    <div className="flex justify-between text-xs text-gray-500 mt-1">
+                      <span>Oscuro</span>
+                      <span>Normal</span>
+                      <span>Claro</span>
+                    </div>
+                  </div>
+
+                  {/* Contraste */}
+                  <div>
+                    <label className="block text-xs font-bebas text-gray-600 mb-1">
+                      Contraste: {selectedPhoto.contrast !== undefined ? selectedPhoto.contrast : 0}
+                    </label>
+                    <input
+                      type="range"
+                      min="-100"
+                      max="100"
+                      step="1"
+                      value={selectedPhoto.contrast !== undefined ? selectedPhoto.contrast : 0}
+                      onChange={(e) => {
+                        const newContrast = Number(e.target.value);
+                        setPhotos((prev) =>
+                          prev.map((p) =>
+                            p.id === selectedId ? { ...p, contrast: newContrast } : p
+                          )
+                        );
+                        setHasUnsavedChanges(true);
+                      }}
+                      className="w-full"
+                    />
+                  </div>
+
+                  {/* Saturación */}
+                  <div>
+                    <label className="block text-xs font-bebas text-gray-600 mb-1">
+                      Saturación: {selectedPhoto.saturation !== undefined ? selectedPhoto.saturation : 0}
+                    </label>
+                    <input
+                      type="range"
+                      min="-2"
+                      max="2"
+                      step="0.1"
+                      value={selectedPhoto.saturation !== undefined ? selectedPhoto.saturation : 0}
+                      onChange={(e) => {
+                        const newSaturation = Number(e.target.value);
+                        setPhotos((prev) =>
+                          prev.map((p) =>
+                            p.id === selectedId ? { ...p, saturation: newSaturation } : p
+                          )
+                        );
+                        setHasUnsavedChanges(true);
+                      }}
+                      className="w-full"
+                    />
+                    <div className="flex justify-between text-xs text-gray-500 mt-1">
+                      <span>B/N</span>
+                      <span>Normal</span>
+                      <span>Vibrante</span>
+                    </div>
+                  </div>
+
+                  {/* Botón de reset */}
+                  <button
+                    onClick={() => {
+                      setPhotos((prev) =>
+                        prev.map((p) =>
+                          p.id === selectedId
+                            ? { ...p, opacity: 1, brightness: 0, contrast: 0, saturation: 0 }
+                            : p
+                        )
+                      );
+                      setHasUnsavedChanges(true);
+                    }}
+                    className="w-full px-3 py-2 bg-gray-100 text-gray-700 rounded text-xs font-bebas hover:bg-gray-200 transition-all"
+                  >
+                    Restaurar Filtros
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Stickers & Text */}
           <div className="bg-white border-2 border-[#39FF14] rounded-lg p-4">
             <label className="block text-sm font-bebas text-[#003300] mb-3">
@@ -2585,11 +3288,12 @@ export const PageEditor: React.FC<PageEditorProps> = ({
       {/* Modal para agregar texto */}
       {showTextModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-fadeIn">
-          <div className="bg-white rounded-lg p-6 max-w-md mx-4 shadow-xl animate-scaleIn">
+          <div className="bg-white rounded-lg p-6 max-w-6xl w-full mx-4 shadow-xl animate-scaleIn max-h-[90vh] flex flex-col">
             <h3 className="text-xl font-bebas text-[#003300] mb-4">
               Agregar Texto
             </h3>
-            <div className="space-y-4">
+            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-6 items-start flex-1 min-h-0">
+              <div className="space-y-4 overflow-y-auto pr-1">
               <div>
                 <label className="block text-sm font-bebas text-[#003300] mb-2">
                   Fuente
@@ -2615,10 +3319,18 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                 </label>
                 <input
                   type="range"
-                  min="16"
-                  max="120"
+                  min="10"
+                  max="320"
                   value={selectedFontSize}
-                  onChange={(e) => setSelectedFontSize(Number(e.target.value))}
+                  onChange={(e) => {
+                    const newFontSize = Number(e.target.value);
+                    setSelectedFontSize(newFontSize);
+                    // Ajustar strokeWidth si excede el nuevo máximo dinámico
+                    const maxStroke = getMaxStrokeWidth(newFontSize);
+                    if (strokeWidth > maxStroke) {
+                      setStrokeWidth(maxStroke);
+                    }
+                  }}
                   className="w-full"
                 />
               </div>
@@ -2633,23 +3345,166 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                   className="w-full h-10 border border-gray-300 rounded-lg cursor-pointer"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-bebas text-[#003300] mb-2">
-                  Texto
+
+              <div className="border border-gray-200 rounded-lg p-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-bebas text-[#003300]">
+                    Borde del texto
+                  </label>
+                  <button
+                    onClick={() => {
+                      setStrokeEnabled((prev) => {
+                        const newValue = !prev;
+                        // Si se activa, establecer grosor apropiado según tamaño
+                        if (newValue) {
+                          const maxStroke = getMaxStrokeWidth(selectedFontSize);
+                          const defaultStroke = Math.min(2, maxStroke);
+                          setStrokeWidth(defaultStroke);
+                        }
+                        return newValue;
+                      });
+                    }}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      strokeEnabled ? 'bg-[#39FF14]' : 'bg-gray-300'
+                    }`}
+                    type="button"
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        strokeEnabled ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {strokeEnabled && (
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <label className="block text-xs font-bebas text-gray-600 mb-1">
+                        Color de borde
+                      </label>
+                      <input
+                        type="color"
+                        value={strokeColor}
+                        onChange={(e) => setStrokeColor(e.target.value)}
+                        className="w-full h-9 border border-gray-300 rounded-lg cursor-pointer"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bebas text-gray-600 mb-1">
+                        Grosor: {strokeWidth}px (máx: {getMaxStrokeWidth(selectedFontSize)}px)
+                      </label>
+                      <input
+                        type="range"
+                        min="1"
+                        max={getMaxStrokeWidth(selectedFontSize)}
+                        value={Math.min(strokeWidth, getMaxStrokeWidth(selectedFontSize))}
+                        onChange={(e) => setStrokeWidth(Number(e.target.value))}
+                        className="w-full"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="border border-gray-200 rounded-lg p-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-bebas text-[#003300]">
+                    Sombra
+                  </label>
+                  <button
+                    onClick={() => setShadowEnabled((prev) => !prev)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      shadowEnabled ? 'bg-[#39FF14]' : 'bg-gray-300'
+                    }`}
+                    type="button"
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        shadowEnabled ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {shadowEnabled && (
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <label className="block text-xs font-bebas text-gray-600 mb-1">
+                        Color de sombra
+                      </label>
+                      <input
+                        type="color"
+                        value={shadowColor}
+                        onChange={(e) => setShadowColor(e.target.value)}
+                        className="w-full h-9 border border-gray-300 rounded-lg cursor-pointer"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bebas text-gray-600 mb-1">
+                        Difuminado: {shadowBlur}px
+                      </label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="40"
+                        value={shadowBlur}
+                        onChange={(e) => setShadowBlur(Number(e.target.value))}
+                        className="w-full"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bebas text-gray-600 mb-1">
+                          Offset X: {shadowOffsetX}px
+                        </label>
+                        <input
+                          type="range"
+                          min="-20"
+                          max="20"
+                          value={shadowOffsetX}
+                          onChange={(e) => setShadowOffsetX(Number(e.target.value))}
+                          className="w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bebas text-gray-600 mb-1">
+                          Offset Y: {shadowOffsetY}px
+                        </label>
+                        <input
+                          type="range"
+                          min="-20"
+                          max="20"
+                          value={shadowOffsetY}
+                          onChange={(e) => setShadowOffsetY(Number(e.target.value))}
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              </div>
+
+              <div className="border border-[#39FF14] rounded-lg p-4 bg-[#F9FFF4] flex flex-col min-h-0">
+                <label className="block text-sm font-bebas text-[#003300] mb-3">
+                  Texto (escribe aquí)
                 </label>
-                <input
-                  type="text"
+                <textarea
                   value={newText}
                   onChange={(e) => setNewText(e.target.value)}
                   placeholder="Escribe tu texto aquí..."
-                  className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg"
-                  style={{
-                    fontFamily: selectedFont,
-                    fontSize: `${Math.min(selectedFontSize, 32)}px`,
-                    color: selectedTextColor
-                  }}
+                  className="w-full h-[280px] lg:h-[360px] max-h-[50vh] overflow-auto border-2 border-[#39FF14] rounded-lg bg-white p-4 focus:outline-none focus:ring-2 focus:ring-[#39FF14]/40"
+                  style={addPreviewStyle}
+                  spellCheck={false}
+                  autoCorrect="off"
+                  autoCapitalize="off"
                   autoFocus
                 />
+                <p className="text-[11px] text-gray-500 mt-2 font-bebas">
+                  Los cambios de borde, color y sombra se aplican en vivo.
+                </p>
               </div>
             </div>
             <div className="flex gap-3 mt-6">
@@ -2673,11 +3528,12 @@ export const PageEditor: React.FC<PageEditorProps> = ({
       {/* Modal para editar texto existente */}
       {showEditTextModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-fadeIn">
-          <div className="bg-white rounded-lg p-6 max-w-md mx-4 shadow-xl animate-scaleIn">
+          <div className="bg-white rounded-lg p-6 max-w-6xl w-full mx-4 shadow-xl animate-scaleIn max-h-[90vh] flex flex-col">
             <h3 className="text-xl font-bebas text-[#003300] mb-4">
               Editar Texto
             </h3>
-            <div className="space-y-4">
+            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-6 items-start flex-1 min-h-0">
+              <div className="space-y-4 overflow-y-auto pr-1">
               <div>
                 <label className="block text-sm font-bebas text-[#003300] mb-2">
                   Fuente
@@ -2703,10 +3559,18 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                 </label>
                 <input
                   type="range"
-                  min="16"
-                  max="120"
+                  min="10"
+                  max="320"
                   value={editFontSize}
-                  onChange={(e) => setEditFontSize(Number(e.target.value))}
+                  onChange={(e) => {
+                    const newFontSize = Number(e.target.value);
+                    setEditFontSize(newFontSize);
+                    // Ajustar editStrokeWidth si excede el nuevo máximo dinámico
+                    const maxStroke = getMaxStrokeWidth(newFontSize);
+                    if (editStrokeWidth > maxStroke) {
+                      setEditStrokeWidth(maxStroke);
+                    }
+                  }}
                   className="w-full"
                 />
               </div>
@@ -2721,23 +3585,166 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                   className="w-full h-10 border border-gray-300 rounded-lg cursor-pointer"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-bebas text-[#003300] mb-2">
-                  Texto
+
+              <div className="border border-gray-200 rounded-lg p-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-bebas text-[#003300]">
+                    Borde del texto
+                  </label>
+                  <button
+                    onClick={() => {
+                      setEditStrokeEnabled((prev) => {
+                        const newValue = !prev;
+                        // Si se activa, establecer grosor apropiado según tamaño
+                        if (newValue) {
+                          const maxStroke = getMaxStrokeWidth(editFontSize);
+                          const defaultStroke = Math.min(2, maxStroke);
+                          setEditStrokeWidth(defaultStroke);
+                        }
+                        return newValue;
+                      });
+                    }}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      editStrokeEnabled ? 'bg-[#39FF14]' : 'bg-gray-300'
+                    }`}
+                    type="button"
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        editStrokeEnabled ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {editStrokeEnabled && (
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <label className="block text-xs font-bebas text-gray-600 mb-1">
+                        Color de borde
+                      </label>
+                      <input
+                        type="color"
+                        value={editStrokeColor}
+                        onChange={(e) => setEditStrokeColor(e.target.value)}
+                        className="w-full h-9 border border-gray-300 rounded-lg cursor-pointer"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bebas text-gray-600 mb-1">
+                        Grosor: {editStrokeWidth}px (máx: {getMaxStrokeWidth(editFontSize)}px)
+                      </label>
+                      <input
+                        type="range"
+                        min="1"
+                        max={getMaxStrokeWidth(editFontSize)}
+                        value={Math.min(editStrokeWidth, getMaxStrokeWidth(editFontSize))}
+                        onChange={(e) => setEditStrokeWidth(Number(e.target.value))}
+                        className="w-full"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="border border-gray-200 rounded-lg p-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-bebas text-[#003300]">
+                    Sombra
+                  </label>
+                  <button
+                    onClick={() => setEditShadowEnabled((prev) => !prev)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      editShadowEnabled ? 'bg-[#39FF14]' : 'bg-gray-300'
+                    }`}
+                    type="button"
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        editShadowEnabled ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {editShadowEnabled && (
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <label className="block text-xs font-bebas text-gray-600 mb-1">
+                        Color de sombra
+                      </label>
+                      <input
+                        type="color"
+                        value={editShadowColor}
+                        onChange={(e) => setEditShadowColor(e.target.value)}
+                        className="w-full h-9 border border-gray-300 rounded-lg cursor-pointer"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bebas text-gray-600 mb-1">
+                        Difuminado: {editShadowBlur}px
+                      </label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="40"
+                        value={editShadowBlur}
+                        onChange={(e) => setEditShadowBlur(Number(e.target.value))}
+                        className="w-full"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bebas text-gray-600 mb-1">
+                          Offset X: {editShadowOffsetX}px
+                        </label>
+                        <input
+                          type="range"
+                          min="-20"
+                          max="20"
+                          value={editShadowOffsetX}
+                          onChange={(e) => setEditShadowOffsetX(Number(e.target.value))}
+                          className="w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bebas text-gray-600 mb-1">
+                          Offset Y: {editShadowOffsetY}px
+                        </label>
+                        <input
+                          type="range"
+                          min="-20"
+                          max="20"
+                          value={editShadowOffsetY}
+                          onChange={(e) => setEditShadowOffsetY(Number(e.target.value))}
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              </div>
+
+              <div className="border border-[#39FF14] rounded-lg p-4 bg-[#F9FFF4] flex flex-col min-h-0">
+                <label className="block text-sm font-bebas text-[#003300] mb-3">
+                  Texto (edita aquí)
                 </label>
-                <input
-                  type="text"
+                <textarea
                   value={editText}
                   onChange={(e) => setEditText(e.target.value)}
                   placeholder="Escribe tu texto aquí..."
-                  className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg"
-                  style={{
-                    fontFamily: editFont,
-                    fontSize: `${Math.min(editFontSize, 32)}px`,
-                    color: editTextColor
-                  }}
+                  className="w-full h-[280px] lg:h-[360px] max-h-[50vh] overflow-auto border-2 border-[#39FF14] rounded-lg bg-white p-4 focus:outline-none focus:ring-2 focus:ring-[#39FF14]/40"
+                  style={editPreviewStyle}
+                  spellCheck={false}
+                  autoCorrect="off"
+                  autoCapitalize="off"
                   autoFocus
                 />
+                <p className="text-[11px] text-gray-500 mt-2 font-bebas">
+                  Los cambios de borde, color y sombra se aplican en vivo.
+                </p>
               </div>
             </div>
             <div className="flex gap-3 mt-6">

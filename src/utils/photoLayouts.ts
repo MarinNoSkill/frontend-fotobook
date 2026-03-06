@@ -15,6 +15,31 @@ const getBorderWidth = (count: number): number => {
   return 37.8; // ~1cm para 20 o menos fotos
 };
 
+const createExactGridPositions = (
+  cols: number,
+  rows: number,
+  spacing: number
+): Array<{ x: number; y: number; width: number; height: number }> => {
+  const totalSpacingX = (cols - 1) * spacing;
+  const totalSpacingY = (rows - 1) * spacing;
+  const cellWidth = (PAGE_WIDTH - totalSpacingX) / cols;
+  const cellHeight = (PAGE_HEIGHT - totalSpacingY) / rows;
+
+  const positions: Array<{ x: number; y: number; width: number; height: number }> = [];
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      positions.push({
+        x: col * (cellWidth + spacing),
+        y: row * (cellHeight + spacing),
+        width: cellWidth,
+        height: cellHeight,
+      });
+    }
+  }
+
+  return positions;
+};
+
 // Layouts predefinidos para cada cantidad
 export const getLayoutsForCount = (count: number, borderWidth?: number): LayoutOption[] => {
   const BORDER_WIDTH = borderWidth !== undefined ? borderWidth : getBorderWidth(count);
@@ -215,10 +240,59 @@ export const getLayoutsForCount = (count: number, borderWidth?: number): LayoutO
         ]
       });
       break;
+
+    // Formatos solicitados: simétricos y con spacing exacto
+    case 16:
+      layouts.push({
+        id: '16-auto',
+        name: 'Cuadrícula 4x4',
+        positions: createExactGridPositions(4, 4, BORDER_WIDTH),
+      });
+      break;
+
+    case 18:
+      layouts.push({
+        id: '18-auto',
+        name: 'Cuadrícula 3x6',
+        positions: createExactGridPositions(3, 6, BORDER_WIDTH),
+      });
+      break;
+
+    case 20:
+      layouts.push({
+        id: '20-auto',
+        name: 'Cuadrícula 4x5',
+        positions: createExactGridPositions(4, 5, BORDER_WIDTH),
+      });
+      break;
+
+    case 25:
+      layouts.push({
+        id: '25-auto',
+        name: 'Cuadrícula 5x5',
+        positions: createExactGridPositions(5, 5, BORDER_WIDTH),
+      });
+      break;
+
+    case 30:
+      layouts.push({
+        id: '30-auto',
+        name: 'Cuadrícula 5x6',
+        positions: createExactGridPositions(5, 6, BORDER_WIDTH),
+      });
+      break;
+
+    case 42:
+      layouts.push({
+        id: '42-auto',
+        name: 'Cuadrícula 6x7',
+        positions: createExactGridPositions(6, 7, BORDER_WIDTH),
+      });
+      break;
       
     default:
       // Cuadrícula automática para otros números
-      const padding = 20;
+      const padding = 0;
       const spacing = BORDER_WIDTH;
       let cols = Math.ceil(Math.sqrt(count));
       let rows = Math.ceil(count / cols);
@@ -236,10 +310,10 @@ export const getLayoutsForCount = (count: number, borderWidth?: number): LayoutO
           const x = padding + col * (photoWidth + spacing);
           const y = padding + row * (photoHeight + spacing);
           positions.push({
-            x: Math.round(x),
-            y: Math.round(y),
-            width: Math.round(photoWidth),
-            height: Math.round(photoHeight),
+            x,
+            y,
+            width: photoWidth,
+            height: photoHeight,
           });
           index++;
         }

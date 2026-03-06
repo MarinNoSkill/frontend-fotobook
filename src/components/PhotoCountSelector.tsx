@@ -12,7 +12,7 @@ export { type LayoutOption } from '../utils/photoLayouts';
 export const PhotoCountSelector: React.FC<PhotoCountSelectorProps> = ({ onSelect, onClose }) => {
   const [selectedCount, setSelectedCount] = useState<number | null>(null);
 
-  const presetCounts = [1, 2, 3, 4, 6, 8, 9, 12, 15, 16, 18, 20, 25, 30, 42];
+  const presetCounts = [1, 2, 3, 4, 6, 8, 9, 12, 16, 18, 20, 25, 30, 42];
   
   const PAGE_WIDTH = 831;
   const PAGE_HEIGHT = 1141;
