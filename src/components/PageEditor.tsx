@@ -1,6 +1,6 @@
         import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { ArrowLeft, Trash2, Copy, RotateCw, Type, Smile, ArrowUp, ArrowDown, Crop, Undo, Redo } from 'lucide-react';
-import { Stage, Layer, Image as KonvaImage, Rect, Transformer, Group, Text as KonvaText } from 'react-konva';
+        import { Stage, Layer, Image as KonvaImage, Rect, Transformer, Group, Text as KonvaText, Line } from 'react-konva';
 import Konva from 'konva';
 import { usePageCache } from '../hooks/usePageCache';
 import { getLayoutById } from '../utils/photoLayouts';
@@ -35,7 +35,87 @@ interface Photo {
   brightness?: number;
   contrast?: number;
   saturation?: number;
+  // Datos para recorte por forma reversible
+  originalSrc?: string;
+  shapeMask?: Exclude<PhotoShapeMask, 'none'>;
 }
+
+type PhotoShapeMask =
+  | 'none'
+  | 'circle'
+  | 'heart'
+  | 'star'
+  | 'diamond'
+  | 'hexagon'
+  | 'rounded'
+  | 'triangle'
+  | 'pentagon'
+  | 'octagon'
+  | 'flower'
+  | 'burst'
+  | 'blob'
+  | 'splash'
+  | 'cloud'
+  | 'moon'
+  | 'droplet'
+  | 'clover'
+  | 'cross'
+  | 'arrow'
+  | 'shield'
+  | 'ticket'
+  | 'speech'
+  | 'leaf'
+  | 'wave'
+  | 'bolt';
+
+const PHOTO_SHAPE_OPTIONS: Array<{ key: PhotoShapeMask; label: string }> = [
+  { key: 'none', label: 'Sin forma' },
+  { key: 'circle', label: 'Circulo' },
+  { key: 'heart', label: 'Corazon' },
+  { key: 'star', label: 'Estrella' },
+  { key: 'diamond', label: 'Rombo' },
+  { key: 'hexagon', label: 'Hexagono' },
+  { key: 'rounded', label: 'Redondeado' },
+  { key: 'triangle', label: 'Triangulo' },
+  { key: 'pentagon', label: 'Pentagono' },
+  { key: 'octagon', label: 'Octagono' },
+  { key: 'flower', label: 'Flor' },
+  { key: 'burst', label: 'Destello' },
+  { key: 'blob', label: 'Blob' },
+  { key: 'splash', label: 'Pintura' },
+  { key: 'cloud', label: 'Nube' },
+  { key: 'droplet', label: 'Gota' },
+  { key: 'clover', label: 'Trebol' },
+  { key: 'cross', label: 'Cruz' },
+  { key: 'arrow', label: 'Flecha' },
+  { key: 'shield', label: 'Escudo' },
+  { key: 'ticket', label: 'Ticket' },
+  { key: 'speech', label: 'Burbuja' },
+  { key: 'leaf', label: 'Hoja' },
+  { key: 'wave', label: 'Onda' },
+  { key: 'bolt', label: 'Rayo' },
+];
+
+const ShapeIcon: React.FC<{ shape: PhotoShapeMask; className?: string }> = ({
+  shape,
+  className = 'w-5 h-5',
+}) => {
+  const previewSrc = useMemo(() => getShapePreviewDataUrl(shape), [shape]);
+
+  if (!previewSrc) {
+    return <span className={className} aria-hidden="true" />;
+  }
+
+  return (
+    <img
+      src={previewSrc}
+      alt=""
+      aria-hidden="true"
+      draggable={false}
+      className={className}
+    />
+  );
+};
 
 interface TextElement {
   id: string;
@@ -790,6 +870,470 @@ const getMaxStrokeWidth = (fontSize: number): number => {
   return 4;
 };
 
+const drawRoundedRectPath = (
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number
+) => {
+  const safeRadius = Math.max(0, Math.min(radius, Math.min(width, height) / 2));
+  ctx.moveTo(x + safeRadius, y);
+  ctx.lineTo(x + width - safeRadius, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + safeRadius);
+  ctx.lineTo(x + width, y + height - safeRadius);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - safeRadius, y + height);
+  ctx.lineTo(x + safeRadius, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - safeRadius);
+  ctx.lineTo(x, y + safeRadius);
+  ctx.quadraticCurveTo(x, y, x + safeRadius, y);
+  ctx.closePath();
+};
+
+const drawRegularPolygonPath = (
+  ctx: CanvasRenderingContext2D,
+  sides: number,
+  cx: number,
+  cy: number,
+  radius: number,
+  rotation = -Math.PI / 2
+) => {
+  if (sides < 3) return;
+  for (let i = 0; i < sides; i++) {
+    const angle = rotation + (Math.PI * 2 * i) / sides;
+    const x = cx + radius * Math.cos(angle);
+    const y = cy + radius * Math.sin(angle);
+    if (i === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  ctx.closePath();
+};
+
+const drawRegularStarPath = (
+  ctx: CanvasRenderingContext2D,
+  points: number,
+  cx: number,
+  cy: number,
+  outerRadius: number,
+  innerRadius: number,
+  rotation = -Math.PI / 2
+) => {
+  if (points < 2) return;
+  const step = Math.PI / points;
+  for (let i = 0; i < points * 2; i++) {
+    const angle = rotation + i * step;
+    const radius = i % 2 === 0 ? outerRadius : innerRadius;
+    const x = cx + radius * Math.cos(angle);
+    const y = cy + radius * Math.sin(angle);
+    if (i === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  ctx.closePath();
+};
+
+const drawHeartEquationPath = (
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  inset: number
+) => {
+  const points: Array<{ x: number; y: number }> = [];
+
+  for (let i = 0; i <= 360; i++) {
+    const t = (i / 360) * Math.PI * 2;
+    const x = 16 * Math.pow(Math.sin(t), 3);
+    const y = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t));
+    points.push({ x, y });
+  }
+
+  const minX = Math.min(...points.map((p) => p.x));
+  const maxX = Math.max(...points.map((p) => p.x));
+  const minY = Math.min(...points.map((p) => p.y));
+  const maxY = Math.max(...points.map((p) => p.y));
+
+  const shapeWidth = maxX - minX;
+  const shapeHeight = maxY - minY;
+  const targetWidth = width - inset * 2;
+  const targetHeight = height - inset * 2;
+  const scale = Math.min(targetWidth / shapeWidth, targetHeight / shapeHeight);
+
+  const offsetX = width / 2 - ((minX + maxX) / 2) * scale;
+  const offsetY = height / 2 - ((minY + maxY) / 2) * scale;
+
+  points.forEach((point, index) => {
+    const px = point.x * scale + offsetX;
+    const py = point.y * scale + offsetY;
+    if (index === 0) {
+      ctx.moveTo(px, py);
+    } else {
+      ctx.lineTo(px, py);
+    }
+  });
+
+  ctx.closePath();
+};
+
+const drawFlowerPath = (
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  outerRadius: number
+) => {
+  const steps = 240;
+  const petals = 6;
+
+  for (let i = 0; i <= steps; i++) {
+    const theta = (i / steps) * Math.PI * 2;
+    const radius = outerRadius * (0.68 + 0.32 * Math.cos(petals * theta));
+    const x = cx + radius * Math.cos(theta);
+    const y = cy + radius * Math.sin(theta);
+    if (i === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+
+  ctx.closePath();
+};
+
+const drawRadialOrganicPath = (
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  radius: number,
+  steps: number,
+  getFactor: (theta: number) => number
+) => {
+  for (let i = 0; i <= steps; i++) {
+    const theta = (i / steps) * Math.PI * 2;
+    const factor = Math.max(0.2, Math.min(1.35, getFactor(theta)));
+    const r = radius * factor;
+    const x = cx + r * Math.cos(theta);
+    const y = cy + r * Math.sin(theta);
+
+    if (i === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+
+  ctx.closePath();
+};
+
+const drawShapeMaskPath = (
+  ctx: CanvasRenderingContext2D,
+  shape: Exclude<PhotoShapeMask, 'none'>,
+  width: number,
+  height: number
+) => {
+  const w = width;
+  const h = height;
+  const cx = w / 2;
+  const cy = h / 2;
+  const inset = Math.min(w, h) * 0.04;
+  const baseRadius = Math.min(w, h) / 2 - inset;
+
+  ctx.beginPath();
+
+  switch (shape) {
+    case 'circle': {
+      const r = baseRadius;
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.closePath();
+      break;
+    }
+    case 'heart': {
+      drawHeartEquationPath(ctx, w, h, inset);
+      break;
+    }
+    case 'star': {
+      drawRegularStarPath(ctx, 5, cx, cy, baseRadius, baseRadius * 0.45);
+      break;
+    }
+    case 'diamond': {
+      drawRegularPolygonPath(ctx, 4, cx, cy, baseRadius, -Math.PI / 2);
+      break;
+    }
+    case 'hexagon': {
+      drawRegularPolygonPath(ctx, 6, cx, cy, baseRadius, -Math.PI / 6);
+      break;
+    }
+    case 'rounded': {
+      drawRoundedRectPath(ctx, inset, inset, w - inset * 2, h - inset * 2, Math.min(w, h) * 0.22);
+      break;
+    }
+    case 'triangle': {
+      drawRegularPolygonPath(ctx, 3, cx, cy, baseRadius);
+      break;
+    }
+    case 'pentagon': {
+      drawRegularPolygonPath(ctx, 5, cx, cy, baseRadius);
+      break;
+    }
+    case 'octagon': {
+      drawRegularPolygonPath(ctx, 8, cx, cy, baseRadius);
+      break;
+    }
+    case 'flower': {
+      drawFlowerPath(ctx, cx, cy, baseRadius);
+      break;
+    }
+    case 'burst': {
+      drawRegularStarPath(ctx, 8, cx, cy, baseRadius, baseRadius * 0.58);
+      break;
+    }
+    case 'blob': {
+      drawRadialOrganicPath(ctx, cx, cy, baseRadius, 220, (theta) => {
+        return 0.8 + 0.16 * Math.sin(theta * 3 + 0.2) + 0.1 * Math.cos(theta * 5 - 0.7) + 0.06 * Math.sin(theta * 7 + 1.2);
+      });
+      break;
+    }
+    case 'splash': {
+      drawRadialOrganicPath(ctx, cx, cy, baseRadius, 260, (theta) => {
+        return 0.6 + 0.2 * Math.abs(Math.sin(theta * 5 + 0.45)) + 0.14 * Math.abs(Math.sin(theta * 11 - 0.8)) + 0.06 * Math.cos(theta * 9);
+      });
+      break;
+    }
+    case 'cloud': {
+      ctx.moveTo(w * 0.18, h * 0.68);
+      ctx.bezierCurveTo(w * 0.12, h * 0.68, w * 0.08, h * 0.62, w * 0.08, h * 0.56);
+      ctx.bezierCurveTo(w * 0.08, h * 0.46, w * 0.16, h * 0.4, w * 0.26, h * 0.41);
+      ctx.bezierCurveTo(w * 0.29, h * 0.28, w * 0.41, h * 0.19, w * 0.54, h * 0.24);
+      ctx.bezierCurveTo(w * 0.64, h * 0.16, w * 0.81, h * 0.2, w * 0.84, h * 0.35);
+      ctx.bezierCurveTo(w * 0.91, h * 0.35, w * 0.95, h * 0.42, w * 0.95, h * 0.49);
+      ctx.bezierCurveTo(w * 0.95, h * 0.61, w * 0.86, h * 0.68, w * 0.74, h * 0.68);
+      ctx.closePath();
+      break;
+    }
+    case 'moon': {
+      const outerRadius = baseRadius;
+      const innerRadius = baseRadius * 0.86;
+      const innerShiftX = baseRadius * 0.32;
+      const innerShiftY = 0;
+
+      // Creciente: arco exterior + arco interior invertido
+      ctx.moveTo(cx, cy - outerRadius);
+      ctx.arc(cx, cy, outerRadius, -Math.PI / 2, Math.PI / 2, true);
+      ctx.arc(
+        cx + innerShiftX,
+        cy + innerShiftY,
+        innerRadius,
+        Math.PI / 2,
+        -Math.PI / 2,
+        false
+      );
+      ctx.closePath();
+      break;
+    }
+    case 'droplet': {
+      ctx.moveTo(cx, h * 0.08);
+      ctx.bezierCurveTo(w * 0.83, h * 0.33, w * 0.78, h * 0.7, cx, h * 0.94);
+      ctx.bezierCurveTo(w * 0.22, h * 0.7, w * 0.17, h * 0.33, cx, h * 0.08);
+      ctx.closePath();
+      break;
+    }
+    case 'clover': {
+      const r = baseRadius * 0.38;
+      ctx.moveTo(cx + r, cy - r);
+      ctx.arc(cx, cy - r, r, 0, Math.PI * 2);
+      ctx.moveTo(cx + r * 2, cy);
+      ctx.arc(cx + r, cy, r, 0, Math.PI * 2);
+      ctx.moveTo(cx + r, cy + r);
+      ctx.arc(cx, cy + r, r, 0, Math.PI * 2);
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx - r, cy, r, 0, Math.PI * 2);
+      drawRoundedRectPath(ctx, cx - r * 0.22, cy + r * 0.86, r * 0.44, r * 1.2, r * 0.2);
+      break;
+    }
+    case 'cross': {
+      const arm = baseRadius * 0.9;
+      const thickness = baseRadius * 0.62;
+      const halfT = thickness / 2;
+      ctx.moveTo(cx - halfT, cy - arm);
+      ctx.lineTo(cx + halfT, cy - arm);
+      ctx.lineTo(cx + halfT, cy - halfT);
+      ctx.lineTo(cx + arm, cy - halfT);
+      ctx.lineTo(cx + arm, cy + halfT);
+      ctx.lineTo(cx + halfT, cy + halfT);
+      ctx.lineTo(cx + halfT, cy + arm);
+      ctx.lineTo(cx - halfT, cy + arm);
+      ctx.lineTo(cx - halfT, cy + halfT);
+      ctx.lineTo(cx - arm, cy + halfT);
+      ctx.lineTo(cx - arm, cy - halfT);
+      ctx.lineTo(cx - halfT, cy - halfT);
+      ctx.closePath();
+      break;
+    }
+    case 'arrow': {
+      ctx.moveTo(w * 0.1, h * 0.38);
+      ctx.lineTo(w * 0.58, h * 0.38);
+      ctx.lineTo(w * 0.58, h * 0.2);
+      ctx.lineTo(w * 0.92, h * 0.5);
+      ctx.lineTo(w * 0.58, h * 0.8);
+      ctx.lineTo(w * 0.58, h * 0.62);
+      ctx.lineTo(w * 0.1, h * 0.62);
+      ctx.closePath();
+      break;
+    }
+    case 'shield': {
+      ctx.moveTo(cx, h * 0.08);
+      ctx.lineTo(w * 0.86, h * 0.24);
+      ctx.lineTo(w * 0.86, h * 0.48);
+      ctx.bezierCurveTo(w * 0.86, h * 0.72, w * 0.68, h * 0.86, cx, h * 0.94);
+      ctx.bezierCurveTo(w * 0.32, h * 0.86, w * 0.14, h * 0.72, w * 0.14, h * 0.48);
+      ctx.lineTo(w * 0.14, h * 0.24);
+      ctx.closePath();
+      break;
+    }
+    case 'ticket': {
+      const left = w * 0.12;
+      const right = w * 0.88;
+      const top = h * 0.18;
+      const bottom = h * 0.82;
+      const notch = Math.min(w, h) * 0.08;
+
+      ctx.moveTo(left, top);
+      ctx.lineTo(right, top);
+      ctx.lineTo(right, h * 0.42);
+      ctx.quadraticCurveTo(right - notch, h * 0.5, right, h * 0.58);
+      ctx.lineTo(right, bottom);
+      ctx.lineTo(left, bottom);
+      ctx.lineTo(left, h * 0.58);
+      ctx.quadraticCurveTo(left + notch, h * 0.5, left, h * 0.42);
+      ctx.closePath();
+      break;
+    }
+    case 'speech': {
+      drawRoundedRectPath(ctx, w * 0.12, h * 0.14, w * 0.76, h * 0.58, Math.min(w, h) * 0.12);
+      ctx.moveTo(w * 0.42, h * 0.72);
+      ctx.lineTo(w * 0.34, h * 0.9);
+      ctx.lineTo(w * 0.56, h * 0.72);
+      ctx.closePath();
+      break;
+    }
+    case 'leaf': {
+      ctx.moveTo(cx, h * 0.08);
+      ctx.bezierCurveTo(w * 0.82, h * 0.22, w * 0.86, h * 0.72, cx, h * 0.92);
+      ctx.bezierCurveTo(w * 0.14, h * 0.72, w * 0.18, h * 0.22, cx, h * 0.08);
+      ctx.closePath();
+      break;
+    }
+    case 'wave': {
+      drawRadialOrganicPath(ctx, cx, cy, baseRadius, 240, (theta) => {
+        return 0.76 + 0.18 * Math.sin(theta * 2 + 0.3) + 0.07 * Math.sin(theta * 6 - 0.6);
+      });
+      break;
+    }
+    case 'bolt': {
+      ctx.moveTo(w * 0.58, h * 0.08);
+      ctx.lineTo(w * 0.32, h * 0.48);
+      ctx.lineTo(w * 0.5, h * 0.48);
+      ctx.lineTo(w * 0.42, h * 0.92);
+      ctx.lineTo(w * 0.74, h * 0.5);
+      ctx.lineTo(w * 0.56, h * 0.5);
+      ctx.closePath();
+      break;
+    }
+    default: {
+      drawRoundedRectPath(ctx, inset, inset, w - inset * 2, h - inset * 2, Math.min(w, h) * 0.12);
+      break;
+    }
+  }
+};
+
+const shapePreviewCache = new Map<PhotoShapeMask, string>();
+
+const getShapePreviewDataUrl = (shape: PhotoShapeMask): string => {
+  const cached = shapePreviewCache.get(shape);
+  if (cached) {
+    return cached;
+  }
+
+  if (typeof document === 'undefined') {
+    return '';
+  }
+
+  const size = 96;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    return '';
+  }
+
+  ctx.clearRect(0, 0, size, size);
+  ctx.fillStyle = '#0f172a';
+
+  if (shape === 'none') {
+    drawRoundedRectPath(ctx, size * 0.17, size * 0.17, size * 0.66, size * 0.66, size * 0.08);
+  } else {
+    drawShapeMaskPath(ctx, shape, size, size);
+  }
+
+  ctx.fill();
+
+  const dataUrl = canvas.toDataURL('image/png', 1);
+  shapePreviewCache.set(shape, dataUrl);
+  return dataUrl;
+};
+
+const createShapeMaskedDataUrl = (
+  source: string,
+  shape: Exclude<PhotoShapeMask, 'none'>,
+  targetWidth: number,
+  targetHeight: number
+): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const image = new window.Image();
+    image.crossOrigin = 'anonymous';
+    image.src = source;
+
+    image.onload = () => {
+      try {
+        const width = Math.max(10, Math.round(targetWidth));
+        const height = Math.max(10, Math.round(targetHeight));
+        const pixelRatio = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(width * pixelRatio);
+        canvas.height = Math.round(height * pixelRatio);
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('No se pudo crear el contexto de canvas'));
+          return;
+        }
+
+        ctx.scale(pixelRatio, pixelRatio);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+
+        drawShapeMaskPath(ctx, shape, width, height);
+        ctx.clip();
+        ctx.drawImage(image, 0, 0, width, height);
+
+        resolve(canvas.toDataURL('image/png', 1));
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error('No se pudo aplicar la forma'));
+      }
+    };
+
+    image.onerror = () => {
+      reject(new Error('No se pudo cargar la imagen para aplicar la forma'));
+    };
+  });
+};
+
 export const PageEditor: React.FC<PageEditorProps> = ({
   pageId,
   onBack,
@@ -885,6 +1429,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   const [cropImageData, setCropImageData] = useState<string>('');
   const [cropImageId, setCropImageId] = useState<string>('');
   const [originalPhotoState, setOriginalPhotoState] = useState<Photo | null>(null);
+  const [isApplyingShape, setIsApplyingShape] = useState(false);
 
   // Requerimiento: no persistir cambios automáticamente.
   const AUTO_SAVE_ENABLED = false;
@@ -898,7 +1443,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   const TOTAL_CANVAS_HEIGHT = 1181; // 30.2cm + borde máximo
   
   // BORDER_SIZE: Marco que va ENCIMA del lienzo
-  // Para múltiples compartimentos, usar valor fijo optimizado
+  // Para múltiples compartimentos, usar valor más delgado para líneas finas  
   // Para página individual, usar valor personalizable del usuario
   const BORDER_SIZE = noBorders ? 0 : (photoCount > 1 ? 20 : customBorderSize);
   
@@ -922,6 +1467,21 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   }, [layoutId, photoCount, BORDER_SIZE]);
   
   const layoutPositions = selectedLayout ? selectedLayout.positions : [];
+  const effectiveLayoutPositions = useMemo(() => {
+    if (layoutPositions.length > 0) {
+      return layoutPositions;
+    }
+
+    if (photoCount === 1) {
+      return [{ x: 0, y: 0, width: PAGE_WIDTH, height: PAGE_HEIGHT }];
+    }
+
+    if (photoCount > 1) {
+      return distributePhotosInGrid(photoCount, PAGE_WIDTH, PAGE_HEIGHT);
+    }
+
+    return [] as Array<{ x: number; y: number; width: number; height: number }>;
+  }, [layoutPositions, photoCount, PAGE_WIDTH, PAGE_HEIGHT]);
 
   const overflowPhotos = useMemo(() => {
     return photos.filter((photo) => {
@@ -1394,7 +1954,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
             const defaultSize = Math.min(PAGE_WIDTH / 3, PAGE_HEIGHT / 3);
             posX = (PAGE_WIDTH - defaultSize) / 2;
             posY = (PAGE_HEIGHT - defaultSize) / 2;
-            width = defaultSize;
+            width = defaultSize;9
             height = defaultSize;
           }
 
@@ -1700,6 +2260,8 @@ export const PageEditor: React.FC<PageEditorProps> = ({
           return {
             ...photo,
             src: croppedImageData,
+            originalSrc: undefined,
+            shapeMask: undefined,
             // Mantener escala visual proporcional al área recortada, sin expandir a la página.
             width: nextWidth,
             height: nextHeight,
@@ -1738,6 +2300,65 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     setCropImageData('');
     setCropImageId('');
     setOriginalPhotoState(null);
+  };
+
+  const handleApplyShapeCrop = async (shape: PhotoShapeMask) => {
+    if (!selectedId || isApplyingShape) return;
+
+    const selectedPhoto = photos.find((p) => p.id === selectedId);
+    if (!selectedPhoto) return;
+
+    const currentShape = selectedPhoto.shapeMask || 'none';
+    if (shape === currentShape) return;
+
+    setIsApplyingShape(true);
+
+    try {
+      if (shape === 'none') {
+        setPhotos((prev) =>
+          prev.map((photo) => {
+            if (photo.id !== selectedId) return photo;
+            return {
+              ...photo,
+              src: photo.originalSrc || photo.src,
+              originalSrc: undefined,
+              shapeMask: undefined,
+            };
+          })
+        );
+        setHasUnsavedChanges(true);
+        setTimeout(() => pushHistory(), 0);
+        return;
+      }
+
+      const baseSrc = selectedPhoto.originalSrc || selectedPhoto.src;
+      const maskedDataUrl = await createShapeMaskedDataUrl(
+        baseSrc,
+        shape,
+        selectedPhoto.width,
+        selectedPhoto.height
+      );
+
+      setPhotos((prev) =>
+        prev.map((photo) => {
+          if (photo.id !== selectedId) return photo;
+          return {
+            ...photo,
+            src: maskedDataUrl,
+            originalSrc: photo.originalSrc || baseSrc,
+            shapeMask: shape,
+          };
+        })
+      );
+      setHasUnsavedChanges(true);
+      setTimeout(() => pushHistory(), 0);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo aplicar la forma';
+      setSaveMessage(`⚠️ ${message}`);
+      setTimeout(() => setSaveMessage(null), 2200);
+    } finally {
+      setIsApplyingShape(false);
+    }
   };
   
   // Funciones para mover elementos con flechas
@@ -2552,7 +3173,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
             )}
 
             <Layer ref={layerRef}>
-              {/* FONDO AZUL completo */}
+              {/* FONDO completo - Mismo color que relleno cuando hay formas */}
               <Rect
                 name="background"
                 x={0}
@@ -2602,7 +3223,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
               </Group>
 
               {/* LÍNEAS DORADAS que dividen según layout */}
-              {layoutPositions.length > 1 && (() => {
+              {effectiveLayoutPositions.length > 1 && (() => {
                 // Generar líneas divisorias robustas y evitar micro-gaps por subpixel.
                 const lines: Array<{type: 'v' | 'h', x: number, y: number, width: number, height: number}> = [];
                 const EPS = 0.5;
@@ -2643,14 +3264,14 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                 
                 console.log('🎯 Calculando líneas divisorias:', {
                   BORDER_SIZE,
-                  layoutPositions: layoutPositions.map(p => ({x: p.x, y: p.y, w: p.width, h: p.height}))
+                  layoutPositions: effectiveLayoutPositions.map(p => ({x: p.x, y: p.y, w: p.width, h: p.height}))
                 });
                 
                 // Encontrar todas las líneas verticales/horizontales únicas
                 const verticalLines = new Set<number>();
                 const horizontalLines = new Set<number>();
 
-                layoutPositions.forEach(pos => {
+                effectiveLayoutPositions.forEach(pos => {
                   const rightEdge = pos.x + pos.width;
                   const bottomEdge = pos.y + pos.height;
 
@@ -2692,7 +3313,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                     let minY = PAGE_HEIGHT;
                     let maxY = 0;
 
-                    layoutPositions.forEach(pos => {
+                    effectiveLayoutPositions.forEach(pos => {
                       const isLeftSide = Math.abs((pos.x + pos.width) - x) < EPS;
                       const isRightSide = Math.abs(pos.x - (x + BORDER_SIZE)) < EPS;
                       if (isLeftSide || isRightSide) {
@@ -2716,7 +3337,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                     let minX = PAGE_WIDTH;
                     let maxX = 0;
 
-                    layoutPositions.forEach(pos => {
+                    effectiveLayoutPositions.forEach(pos => {
                       const isTopSide = Math.abs((pos.y + pos.height) - y) < EPS;
                       const isBottomSide = Math.abs(pos.y - (y + BORDER_SIZE)) < EPS;
                       if (isTopSide || isBottomSide) {
@@ -2764,7 +3385,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                 );
               })()}
 
-              {/* Marco exterior (solo si no es noBorders) */}
+              {/* Marco exterior */}
               {!noBorders && (
                 <Group listening={false}>
                   {/* Borde superior */}
@@ -3233,6 +3854,51 @@ export const PageEditor: React.FC<PageEditorProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Recorte rapido por formas - solo para foto seleccionada */}
+          {selectedId && photos.find((p) => p.id === selectedId) && (() => {
+            const selectedPhoto = photos.find((p) => p.id === selectedId)!;
+            const activeShape = selectedPhoto.shapeMask || 'none';
+
+            return (
+              <div className="bg-white border-2 border-[#39FF14] rounded-lg p-4">
+                <label className="block text-sm font-bebas text-[#003300] mb-2">
+                  ✂️ Recorte por Formas
+                </label>
+                <p className="text-[11px] text-gray-500 mb-3 font-bebas">
+                  Aplica una forma al instante sin abrir el modal de recorte.
+                </p>
+
+                <div className="grid grid-cols-6 gap-2">
+                  {PHOTO_SHAPE_OPTIONS.map((shapeOption) => {
+                    const isActive = activeShape === shapeOption.key;
+                    return (
+                      <button
+                        key={shapeOption.key}
+                        type="button"
+                        title={shapeOption.label}
+                        disabled={isApplyingShape}
+                        onClick={() => handleApplyShapeCrop(shapeOption.key)}
+                        className={`aspect-square rounded-lg border text-xl font-bebas flex items-center justify-center transition-all ${
+                          isActive
+                            ? 'bg-[#39FF14] text-[#003300] border-[#39FF14]'
+                            : 'bg-white text-[#003300] border-[#B7EFB2] hover:bg-[#F2FFF0]'
+                        } ${isApplyingShape ? 'opacity-60 cursor-not-allowed' : ''}`}
+                      >
+                        <ShapeIcon shape={shapeOption.key} className="w-5 h-5" />
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {isApplyingShape && (
+                  <p className="text-[11px] text-[#003300] mt-2 font-bebas animate-pulse">
+                    Aplicando forma...
+                  </p>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Filtros de Imagen - Solo visible cuando una foto está seleccionada */}
           {selectedId && photos.find(p => p.id === selectedId) && (() => {
