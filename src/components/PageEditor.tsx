@@ -2267,6 +2267,8 @@ export const PageEditor: React.FC<PageEditorProps> = ({
             height: nextHeight,
             x: nextX,
             y: nextY,
+            // Preservar la rotación aplicada en el modal de recorte
+            rotation: cropInfo.rotation,
           };
         }
         return photo;
