@@ -227,12 +227,14 @@ const PhotoImage: React.FC<{
       <KonvaImage
         ref={imageRef}
         image={image}
-        x={photo.x}
-        y={photo.y}
+        x={photo.x + photo.width / 2}
+        y={photo.y + photo.height / 2}
         width={photo.width}
         height={photo.height}
         rotation={photo.rotation}
         opacity={photo.opacity !== undefined ? photo.opacity : 1}
+        offsetX={photo.width / 2}
+        offsetY={photo.height / 2}
         draggable
         onClick={onSelect}
         onTap={onSelect}
@@ -248,16 +250,18 @@ const PhotoImage: React.FC<{
         }}
         onDragMove={(e) => {
           const node = e.target;
+          // Convertir coordenadas del centro a esquina superior izquierda
           onChange({
-            x: node.x(),
-            y: node.y(),
+            x: node.x() - node.width() / 2,
+            y: node.y() - node.height() / 2,
           });
         }}
         onDragEnd={(e) => {
           const node = e.target;
+          // Ahora x,y representan el centro, convertir a esquina superior izquierda para almacenar
           onChange({
-            x: node.x(),
-            y: node.y(),
+            x: node.x() - node.width() / 2,
+            y: node.y() - node.height() / 2,
           });
           onDragEnd();
         }}
@@ -270,11 +274,19 @@ const PhotoImage: React.FC<{
           node.scaleX(1);
           node.scaleY(1);
 
+          const newWidth = Math.max(5, node.width() * scaleX);
+          const newHeight = Math.max(5, node.height() * scaleY);
+
+          // Actualizar offsetX y offsetY para que sigan siendo el centro
+          node.offsetX(newWidth / 2);
+          node.offsetY(newHeight / 2);
+
+          // Convertir coordinate del centro a esquina superior izquierda para almacenar
           onChange({
-            x: node.x(),
-            y: node.y(),
-            width: Math.max(5, node.width() * scaleX),
-            height: Math.max(5, node.height() * scaleY),
+            x: node.x() - newWidth / 2,
+            y: node.y() - newHeight / 2,
+            width: newWidth,
+            height: newHeight,
             rotation: node.rotation(),
           });
           onTransformEnd();
@@ -2253,32 +2265,11 @@ export const PageEditor: React.FC<PageEditorProps> = ({
           const nextWidth = Math.max(1, photo.width * widthRatio);
           const nextHeight = Math.max(1, photo.height * heightRatio);
 
-          // Calcular centro original de la foto
-          const originalCenterX = photo.x + photo.width / 2;
-          const originalCenterY = photo.y + photo.height / 2;
-
-          // Calcular dimensiones efectivas considerando la rotación
-          const rotation = cropInfo.rotation;
-          const radians = (rotation * Math.PI) / 180;
-          const cos = Math.abs(Math.cos(radians));
-          const sin = Math.abs(Math.sin(radians));
-          
-          // Dimensiones del bounding box con rotación
-          const effectiveWidth = nextWidth * cos + nextHeight * sin;
-          const effectiveHeight = nextWidth * sin + nextHeight * cos;
-
-          // Calcular nueva posición centrada en el mismo lugar
-          let nextX = originalCenterX - nextWidth / 2;
-          let nextY = originalCenterY - nextHeight / 2;
-
-          // Ajustar para mantener dentro del lienzo considerando la rotación
-          const minX = -(effectiveWidth - nextWidth) / 2;
-          const maxX = PAGE_WIDTH - nextWidth + (effectiveWidth - nextWidth) / 2;
-          const minY = -(effectiveHeight - nextHeight) / 2;
-          const maxY = PAGE_HEIGHT - nextHeight + (effectiveHeight - nextHeight) / 2;
-
-          nextX = Math.max(minX, Math.min(maxX, nextX));
-          nextY = Math.max(minY, Math.min(maxY, nextY));
+          // Como usamos offsetX/offsetY para centrar la rotación,
+          // solo necesitamos mantener las mismas coordenadas x,y (que representan esquina superior izquierda)
+          // El centro se mantendrá automáticamente gracias a offsetX/offsetY
+          const nextX = photo.x + (photo.width - nextWidth) / 2;
+          const nextY = photo.y + (photo.height - nextHeight) / 2;
 
           return {
             ...photo,
