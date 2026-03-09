@@ -2253,9 +2253,32 @@ export const PageEditor: React.FC<PageEditorProps> = ({
           const nextWidth = Math.max(1, photo.width * widthRatio);
           const nextHeight = Math.max(1, photo.height * heightRatio);
 
-          // Mantener el centro visual para que el recorte no "mueva" la foto en la página.
-          const nextX = photo.x + (photo.width - nextWidth) / 2;
-          const nextY = photo.y + (photo.height - nextHeight) / 2;
+          // Calcular centro original de la foto
+          const originalCenterX = photo.x + photo.width / 2;
+          const originalCenterY = photo.y + photo.height / 2;
+
+          // Calcular dimensiones efectivas considerando la rotación
+          const rotation = cropInfo.rotation;
+          const radians = (rotation * Math.PI) / 180;
+          const cos = Math.abs(Math.cos(radians));
+          const sin = Math.abs(Math.sin(radians));
+          
+          // Dimensiones del bounding box con rotación
+          const effectiveWidth = nextWidth * cos + nextHeight * sin;
+          const effectiveHeight = nextWidth * sin + nextHeight * cos;
+
+          // Calcular nueva posición centrada en el mismo lugar
+          let nextX = originalCenterX - nextWidth / 2;
+          let nextY = originalCenterY - nextHeight / 2;
+
+          // Ajustar para mantener dentro del lienzo considerando la rotación
+          const minX = -(effectiveWidth - nextWidth) / 2;
+          const maxX = PAGE_WIDTH - nextWidth + (effectiveWidth - nextWidth) / 2;
+          const minY = -(effectiveHeight - nextHeight) / 2;
+          const maxY = PAGE_HEIGHT - nextHeight + (effectiveHeight - nextHeight) / 2;
+
+          nextX = Math.max(minX, Math.min(maxX, nextX));
+          nextY = Math.max(minY, Math.min(maxY, nextY));
 
           return {
             ...photo,
