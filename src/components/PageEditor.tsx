@@ -3223,7 +3223,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
               </Group>
 
               {/* LÍNEAS DORADAS que dividen según layout */}
-              {effectiveLayoutPositions.length > 1 && (() => {
+              {!noBorders && effectiveLayoutPositions.length > 1 && (() => {
                 // Generar líneas divisorias robustas y evitar micro-gaps por subpixel.
                 const lines: Array<{type: 'v' | 'h', x: number, y: number, width: number, height: number}> = [];
                 const EPS = 0.5;
