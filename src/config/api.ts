@@ -1,4 +1,9 @@
-export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+const rawApiUrl = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+const normalizedApiUrl = rawApiUrl.replace(/\/+$/, '');
+
+export const API_BASE_URL = /\/api$/i.test(normalizedApiUrl)
+  ? normalizedApiUrl
+  : `${normalizedApiUrl}/api`;
 
 export const API_ENDPOINTS = {
   requestLogin: `${API_BASE_URL}/auth/request-login`,

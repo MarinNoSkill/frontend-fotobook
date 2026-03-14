@@ -262,7 +262,7 @@ export const FinalizationModal: React.FC<FinalizationModalProps> = ({ onClose, o
               <p className="text-sm font-bebas text-[#6B7280] mb-6">
                 {currentStep === 'admin-email' && 'Procesando en segundo plano...'}
                 {currentStep === 'downloading' && 'Preparando descarga optimizada'}
-                {currentStep === 'preparing' && 'Optimizando PDF de 6 páginas'}
+                {currentStep === 'preparing' && 'Optimizando PDF en 3 hojas dobles (45x30 cm)'}
               </p>
 
               {/* Barra de progreso */}

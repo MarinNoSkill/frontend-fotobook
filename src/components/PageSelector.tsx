@@ -67,6 +67,16 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
   const PAGE_HEIGHT = 1141; // 30.2 cm
   const BORDER_SIZE = 37.8; // ~1cm
 
+  // Formato final de impresión: hoja doble de 45cm x 30cm
+  const PDF_SHEET_WIDTH_MM = 450;
+  const PDF_SHEET_HEIGHT_MM = 300;
+  const PDF_EXPORT_DPI = 140;
+  const PDF_PAGE_PAIRS: Array<[number, number]> = [
+    [1, 6],
+    [2, 3],
+    [4, 5],
+  ];
+
   // Cargar páginas del caché al montarse y cuando cambia editedPages
   useEffect(() => {
     const loadCachedPages = async () => {
@@ -121,7 +131,7 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
     return true;
   };
 
-  // Generar y descargar PDF con las 6 páginas
+  // Generar y descargar PDF con 3 hojas dobles (45cm x 30cm)
   const handleGeneratePDF = async (
     userData: {cedula: string, celular: string, direccion: string}, 
     onProgress: (step: string, progress: number) => void
@@ -129,49 +139,59 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
     try {
       onProgress('preparing', 10);
 
-      // Crear PDF optimizado (22cm x 30.2cm) - CALIDAD BALANCEADA
+      // Crear PDF optimizado (45cm x 30cm) en formato horizontal
       const pdf = new jsPDF({
-        orientation: 'portrait',
+        orientation: 'landscape',
         unit: 'mm',
-        format: [220, 302],
+        format: [PDF_SHEET_WIDTH_MM, PDF_SHEET_HEIGHT_MM],
         compress: true // Activar compresión para reducir tamaño
       });
 
-      // Dimensiones personalizadas en mm (22cm x 30.2cm)
-      const pageWidth = 220;
-      const pageHeight = 302;
+      const sheetWidth = PDF_SHEET_WIDTH_MM;
+      const sheetHeight = PDF_SHEET_HEIGHT_MM;
 
-      // Agregar cada página del fotobook al PDF - MÁXIMA CALIDAD
-      for (let i = 1; i <= 6; i++) {
-        const cachedPage = cachedPages.get(i);
-        
-        if (cachedPage && cachedPage.previewImage) {
-          // Si no es la primera página, agregar nueva página al PDF
-          if (i > 1) {
-            pdf.addPage();
-          }
+      for (let pairIndex = 0; pairIndex < PDF_PAGE_PAIRS.length; pairIndex++) {
+        const [leftPageId, rightPageId] = PDF_PAGE_PAIRS[pairIndex];
+        const leftPage = cachedPages.get(leftPageId);
+        const rightPage = cachedPages.get(rightPageId);
 
-          // Agregar imagen directamente sin comprimir
-          try {
-            // Optimizar imagen antes de agregarla al PDF
-            const optimizedImage = await optimizeImageForPDF(cachedPage.previewImage);
-            pdf.addImage(
-              optimizedImage,
-              'JPEG', // Usar JPEG para mejor compresión
-              0,
-              0,
-              pageWidth,
-              pageHeight,
-              undefined,
-              'FAST' // Compresión rápida pero efectiva
-            );
-          } catch (error) {
-            // Error silencioso
-          }
+        // Si no es la primera hoja, agregar nueva hoja al PDF
+        if (pairIndex > 0) {
+          pdf.addPage();
         }
-        
-        // Actualizar progreso de preparación (10% a 25%)
-        onProgress('preparing', 10 + (i * 2.5));
+
+        if (!leftPage?.previewImage) {
+          throw new Error(`No se pudo generar el PDF: falta la vista previa de la página ${leftPageId}.`);
+        }
+
+        if (!rightPage?.previewImage) {
+          throw new Error(`No se pudo generar el PDF: falta la vista previa de la página ${rightPageId}.`);
+        }
+
+        try {
+          const spreadImageDataUrl = await createSpreadImageForPDF(
+            leftPage.previewImage,
+            rightPage.previewImage
+          );
+
+          pdf.addImage(
+            spreadImageDataUrl,
+            'JPEG',
+            0,
+            0,
+            sheetWidth,
+            sheetHeight,
+            undefined,
+            'FAST'
+          );
+        } catch {
+          throw new Error(
+            `No se pudo procesar la hoja compuesta ${pairIndex + 1} (${leftPageId}-${rightPageId}).`
+          );
+        }
+
+        // Actualizar progreso de preparación (10% a 40%) por hoja compuesta
+        onProgress('preparing', 10 + ((pairIndex + 1) / PDF_PAGE_PAIRS.length) * 30);
       }
 
       // Generar el PDF como blob
@@ -201,41 +221,89 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
     }
   };
 
-  // Optimizar imagen para PDF (reducir tamaño manteniendo calidad)
-  const optimizeImageForPDF = async (imageDataUrl: string): Promise<string> => {
-    return new Promise((resolve) => {
+  const loadImageForPDF = async (
+    imageDataUrl: string
+  ): Promise<HTMLImageElement> => {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('No se pudo cargar la imagen para exportar PDF.'));
+      image.src = imageDataUrl;
+    });
+  };
+
+  const createSpreadImageForPDF = async (
+    leftImageDataUrl: string,
+    rightImageDataUrl: string
+  ): Promise<string> => {
+    const [leftImage, rightImage] = await Promise.all([
+      loadImageForPDF(leftImageDataUrl),
+      loadImageForPDF(rightImageDataUrl),
+    ]);
+
+    return new Promise((resolve, reject) => {
       const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d')!;
-      const img = new Image();
-      
-      img.onload = () => {
-        // Mantener resolución alta pero optimizar compresión
-        const maxWidth = 1654; // ~220mm a 190 DPI
-        const maxHeight = 2268; // ~302mm a 190 DPI
-        
-        let { width, height } = img;
-        
-        // Escalar solo si es necesario (mantener calidad visual)
-        if (width > maxWidth || height > maxHeight) {
-          const ratio = Math.min(maxWidth / width, maxHeight / height);
-          width *= ratio;
-          height *= ratio;
-        }
-        
-        canvas.width = width;
-        canvas.height = height;
-        
-        // Mejorar calidad de renderizado
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        
-        ctx.drawImage(img, 0, 0, width, height);
-        
-        // Comprimir a JPEG con 85% calidad (balance perfecto tamaño/calidad)
-        resolve(canvas.toDataURL('image/jpeg', 0.85));
-      };
-      
-      img.src = imageDataUrl;
+      const ctx = canvas.getContext('2d');
+
+      if (!ctx) {
+        reject(new Error('No se pudo crear el canvas de exportación.'));
+        return;
+      }
+
+      const outputWidth = Math.round((PDF_SHEET_WIDTH_MM / 25.4) * PDF_EXPORT_DPI);
+      const outputHeight = Math.round((PDF_SHEET_HEIGHT_MM / 25.4) * PDF_EXPORT_DPI);
+      const leftAspectRatio = leftImage.width / leftImage.height;
+      const rightAspectRatio = rightImage.width / rightImage.height;
+
+      canvas.width = outputWidth;
+      canvas.height = outputHeight;
+
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+
+      // Conserva la proporción original del lienzo y deja la diferencia solo en la unión central.
+      const pageHeight = outputHeight;
+      const leftPageWidth = Math.round(pageHeight * leftAspectRatio);
+      const rightPageWidth = Math.round(pageHeight * rightAspectRatio);
+      const remainingGap = Math.max(0, outputWidth - leftPageWidth - rightPageWidth);
+      const leftGapWidth = Math.floor(remainingGap / 2);
+      const rightGapWidth = remainingGap - leftGapWidth;
+      const rightPageX = outputWidth - rightPageWidth;
+
+      ctx.drawImage(leftImage, 0, 0, leftPageWidth, pageHeight);
+
+      if (leftGapWidth > 0) {
+        ctx.drawImage(
+          leftImage,
+          leftImage.width - 1,
+          0,
+          1,
+          leftImage.height,
+          leftPageWidth,
+          0,
+          leftGapWidth,
+          pageHeight
+        );
+      }
+
+      if (rightGapWidth > 0) {
+        ctx.drawImage(
+          rightImage,
+          0,
+          0,
+          1,
+          rightImage.height,
+          leftPageWidth + leftGapWidth,
+          0,
+          rightGapWidth,
+          pageHeight
+        );
+      }
+
+      ctx.drawImage(rightImage, rightPageX, 0, rightPageWidth, pageHeight);
+
+      resolve(canvas.toDataURL('image/jpeg', 0.92));
     });
   };
 
