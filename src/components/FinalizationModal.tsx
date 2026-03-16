@@ -1,28 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { X, Download, Loader2, CheckCircle2, MapPin, User, Phone } from 'lucide-react';
+import { X, Download, Loader2, CheckCircle2, MapPin } from 'lucide-react';
 
 interface FinalizationModalProps {
   onClose: () => void;
-  onGenerate: (userData: {cedula: string, celular: string, direccion: string}, onProgress: (step: string, progress: number) => void) => Promise<void>;
+  onGenerate: (userData: {direccion: string}, onProgress: (step: string, progress: number) => void) => Promise<void>;
 }
 
 type ProcessStep = 'preparing' | 'admin-email' | 'downloading' | 'success';
 
 export const FinalizationModal: React.FC<FinalizationModalProps> = ({ onClose, onGenerate }) => {
   const [direccion, setDireccion] = useState('');
-  const [cedula, setCedula] = useState('');
-  const [celular, setCelular] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentStep, setCurrentStep] = useState<ProcessStep>('preparing');
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
-
-  const stepMessages = {
-    preparing: 'Optimizando tu fotobook...',
-    'admin-email': 'Enviando al administrador...',
-    downloading: 'Descargando PDF...',
-    success: '¡Completado!'
-  };
 
   // Recargar página cuando se complete al 100%
   useEffect(() => {
@@ -38,30 +29,7 @@ export const FinalizationModal: React.FC<FinalizationModalProps> = ({ onClose, o
     
     // Validaciones de campos obligatorios
     if (!direccion.trim()) {
-      setError('La dirección es obligatoria');
-      return;
-    }
-    
-    if (!cedula.trim()) {
-      setError('La cédula es obligatoria');
-      return;
-    }
-    
-    if (!celular.trim()) {
-      setError('El número de celular es obligatorio');
-      return;
-    }
-    
-    // Validar cédula (8-11 dígitos)
-    if (!/^\d{8,11}$/.test(cedula)) {
-      setError('La cédula debe tener entre 8 y 11 dígitos');
-      return;
-    }
-    
-    // Validar celular (10 dígitos, puede empezar con +57)
-    const celularClean = celular.replace(/[^\d]/g, '');
-    if (!/^(57)?3\d{9}$|^3\d{9}$/.test(celularClean)) {
-      setError('El celular debe tener 10 dígitos y empezar con 3 (ej: 3001234567)');
+      setError('La direccion es obligatoria');
       return;
     }
 
@@ -71,7 +39,7 @@ export const FinalizationModal: React.FC<FinalizationModalProps> = ({ onClose, o
 
     try {
       await onGenerate(
-        { cedula: cedula.trim(), celular: celular.trim(), direccion: direccion.trim() },
+        { direccion: direccion.trim() },
         (step: string, progressValue: number) => {
           setCurrentStep(step as ProcessStep);
           setProgress(progressValue);
@@ -81,7 +49,7 @@ export const FinalizationModal: React.FC<FinalizationModalProps> = ({ onClose, o
       setCurrentStep('success');
       setProgress(100);
     } catch (err: any) {
-      setError(err.message || 'Error al generar el PDF. Intenta nuevamente.');
+      setError(err.message || 'Error al generar el ZIP. Intenta nuevamente.');
       setIsGenerating(false);
       setProgress(0);
     }
@@ -107,54 +75,14 @@ export const FinalizationModal: React.FC<FinalizationModalProps> = ({ onClose, o
                   <Download className="w-8 h-8 text-[#39FF14]" />
                 </div>
                 <h3 className="text-2xl font-bausch text-[#003300] mb-2">
-                  ¡Listo para Descargar!
+                  Listo para Descargar
                 </h3>
                 <p className="text-sm font-bebas text-[#6B7280]">
-                  Completa tus datos para generar el fotobook
+                  Completa tu dirección para generar el fotobook
                 </p>
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-bebas text-[#003300] mb-2">
-                    <User className="w-4 h-4 inline mr-1" />
-                    Cédula *
-                  </label>
-                  <input
-                    type="text"
-                    value={cedula}
-                    onChange={(e) => {
-                      const value = e.target.value.replace(/[^\d]/g, ''); // Solo números
-                      if (value.length <= 11) setCedula(value);
-                    }}
-                    placeholder="12345678"
-                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-[#39FF14] focus:outline-none transition-colors"
-                    disabled={isGenerating}
-                    maxLength={11}
-                    required
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-bebas text-[#003300] mb-2">
-                    <Phone className="w-4 h-4 inline mr-1" />
-                    Celular *
-                  </label>
-                  <input
-                    type="tel"
-                    value={celular}
-                    onChange={(e) => {
-                      const value = e.target.value.replace(/[^\d]/g, ''); // Solo números
-                      if (value.length <= 10) setCelular(value);
-                    }}
-                    placeholder="3001234567"
-                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-[#39FF14] focus:outline-none transition-colors"
-                    disabled={isGenerating}
-                    maxLength={10}
-                    required
-                  />
-                </div>
-                
                 <div>
                   <label className="block text-sm font-bebas text-[#003300] mb-2">
                     <MapPin className="w-4 h-4 inline mr-1" />
@@ -177,10 +105,6 @@ export const FinalizationModal: React.FC<FinalizationModalProps> = ({ onClose, o
                   </div>
                 )}
 
-                <div className="bg-[#39FF14]/5 border border-[#39FF14]/20 rounded-lg p-3 text-xs text-[#003300] font-bebas">
-                  ℹ️ Solo necesitamos estos datos para generar tu fotobook. El archivo se descargará automáticamente.
-                </div>
-
                 <div className="flex gap-3">
                   <button
                     type="button"
@@ -192,7 +116,7 @@ export const FinalizationModal: React.FC<FinalizationModalProps> = ({ onClose, o
                   </button>
                   <button
                     type="submit"
-                    disabled={isGenerating || !direccion.trim() || !cedula.trim() || !celular.trim()}
+                    disabled={isGenerating || !direccion.trim()}
                     className="flex-1 px-4 py-3 bg-[#39FF14] text-[#003300] rounded-lg font-bebas hover:bg-[#66FF44] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   >
                     {isGenerating ? (
@@ -203,7 +127,7 @@ export const FinalizationModal: React.FC<FinalizationModalProps> = ({ onClose, o
                     ) : (
                       <>
                         <Download className="w-4 h-4" />
-                        Generar PDF
+                        Generar ZIP
                       </>
                     )}
                   </button>
@@ -221,10 +145,10 @@ export const FinalizationModal: React.FC<FinalizationModalProps> = ({ onClose, o
               </div>
 
               <h3 className="text-2xl font-bausch text-[#003300] mb-2">
-                ¡Fotobook Procesado!
+                Fotobook Procesado
               </h3>
               <p className="text-sm font-bebas text-[#6B7280] mb-1">
-                Tu fotobook optimizado se ha descargado correctamente
+                Tus 3 hojas JPG en alta calidad se descargaron correctamente en un ZIP
               </p>
               <p className="text-xs font-bebas text-[#9CA3AF] mb-6">
                 El archivo ha sido procesado exitosamente
@@ -257,13 +181,8 @@ export const FinalizationModal: React.FC<FinalizationModalProps> = ({ onClose, o
 
               {/* Mensaje del paso actual */}
               <h3 className="text-2xl font-bausch text-[#003300] mb-2">
-                {stepMessages[currentStep]}
+                Exportando...
               </h3>
-              <p className="text-sm font-bebas text-[#6B7280] mb-6">
-                {currentStep === 'admin-email' && 'Procesando en segundo plano...'}
-                {currentStep === 'downloading' && 'Preparando descarga optimizada'}
-                {currentStep === 'preparing' && 'Optimizando PDF en 3 hojas dobles (45x30 cm)'}
-              </p>
 
               {/* Barra de progreso */}
               <div className="w-full bg-gray-200 rounded-full h-3 mb-2 overflow-hidden">

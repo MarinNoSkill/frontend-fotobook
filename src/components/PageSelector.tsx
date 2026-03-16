@@ -3,7 +3,8 @@ import { PhotoCountSelector } from './PhotoCountSelector';
 import { FinalizationModal } from './FinalizationModal';
 import { usePageCache } from '../hooks/usePageCache';
 import { CheckCircle2 } from 'lucide-react';
-import jsPDF from 'jspdf';
+import JSZip from 'jszip';
+import { API_ENDPOINTS } from '../config/api';
 
 interface Page {
   id: number;
@@ -36,7 +37,26 @@ interface UserData {
   otpVerified: boolean;
 }
 
-import { API_ENDPOINTS } from '../config/api';
+interface SheetSource {
+  sheetNumber: number;
+  leftPageId: number;
+  rightPageId: number;
+  leftPreviewImage: string;
+  rightPreviewImage: string;
+}
+
+interface LoadedSheetSource {
+  sheetNumber: number;
+  leftImage: HTMLImageElement;
+  rightImage: HTMLImageElement;
+}
+
+interface ZipBuildResult {
+  zipBlob: Blob;
+  zipSizeBytes: number;
+  dpi: number;
+  quality: number;
+}
 
 interface PageSelectorProps {
   onSelectPage: (pageId: number, photoCount?: number, layoutId?: string) => void;
@@ -68,11 +88,16 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
   const BORDER_SIZE = 37.8; // ~1cm
 
   // Formato final de impresión: hoja doble de 45cm x 30cm
-  const PDF_SHEET_WIDTH_MM = 450;
-  const PDF_SHEET_HEIGHT_MM = 300;
-  const PDF_EXPORT_DPI = 140;
-  const PDF_PAGE_PAIRS: Array<[number, number]> = [
-    [1, 6],
+  const SHEET_WIDTH_MM = 450;
+  const SHEET_HEIGHT_MM = 300;
+  const CONTENT_WIDTH_MM = 430; // 43 cm útiles
+  const CONTENT_HEIGHT_MM = 280; // 28 cm útiles
+  const TARGET_ZIP_SIZE_BYTES = 8 * 1024 * 1024;
+  const JPEG_MIN_QUALITY = 0.62;
+  const JPEG_MAX_QUALITY = 1;
+  const EXPORT_DPI_CANDIDATES = [340, 320, 300, 280, 260, 240, 220, 200, 180, 160, 140, 130, 120, 110, 100];
+  const SHEET_PAGE_PAIRS: Array<[number, number]> = [
+    [6, 1],
     [2, 3],
     [4, 5],
   ];
@@ -131,89 +156,73 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
     return true;
   };
 
-  // Generar y descargar PDF con 3 hojas dobles (45cm x 30cm)
+  // Generar y descargar ZIP con 3 hojas JPG (45cm x 30cm cada hoja)
   const handleGeneratePDF = async (
-    userData: {cedula: string, celular: string, direccion: string}, 
+    exportData: {direccion: string}, 
     onProgress: (step: string, progress: number) => void
   ) => {
     try {
       onProgress('preparing', 10);
 
-      // Crear PDF optimizado (45cm x 30cm) en formato horizontal
-      const pdf = new jsPDF({
-        orientation: 'landscape',
-        unit: 'mm',
-        format: [PDF_SHEET_WIDTH_MM, PDF_SHEET_HEIGHT_MM],
-        compress: true // Activar compresión para reducir tamaño
-      });
+      const sheetSources: SheetSource[] = [];
 
-      const sheetWidth = PDF_SHEET_WIDTH_MM;
-      const sheetHeight = PDF_SHEET_HEIGHT_MM;
-
-      for (let pairIndex = 0; pairIndex < PDF_PAGE_PAIRS.length; pairIndex++) {
-        const [leftPageId, rightPageId] = PDF_PAGE_PAIRS[pairIndex];
+      for (let pairIndex = 0; pairIndex < SHEET_PAGE_PAIRS.length; pairIndex++) {
+        const [leftPageId, rightPageId] = SHEET_PAGE_PAIRS[pairIndex];
         const leftPage = cachedPages.get(leftPageId);
         const rightPage = cachedPages.get(rightPageId);
 
-        // Si no es la primera hoja, agregar nueva hoja al PDF
-        if (pairIndex > 0) {
-          pdf.addPage();
-        }
-
         if (!leftPage?.previewImage) {
-          throw new Error(`No se pudo generar el PDF: falta la vista previa de la página ${leftPageId}.`);
+          throw new Error(`No se pudo generar el archivo: falta la vista previa de la página ${leftPageId}.`);
         }
 
         if (!rightPage?.previewImage) {
-          throw new Error(`No se pudo generar el PDF: falta la vista previa de la página ${rightPageId}.`);
+          throw new Error(`No se pudo generar el archivo: falta la vista previa de la página ${rightPageId}.`);
         }
 
-        try {
-          const spreadImageDataUrl = await createSpreadImageForPDF(
-            leftPage.previewImage,
-            rightPage.previewImage
-          );
+        sheetSources.push({
+          sheetNumber: pairIndex + 1,
+          leftPageId,
+          rightPageId,
+          leftPreviewImage: leftPage.previewImage,
+          rightPreviewImage: rightPage.previewImage,
+        });
 
-          pdf.addImage(
-            spreadImageDataUrl,
-            'JPEG',
-            0,
-            0,
-            sheetWidth,
-            sheetHeight,
-            undefined,
-            'FAST'
-          );
-        } catch {
-          throw new Error(
-            `No se pudo procesar la hoja compuesta ${pairIndex + 1} (${leftPageId}-${rightPageId}).`
-          );
-        }
-
-        // Actualizar progreso de preparación (10% a 40%) por hoja compuesta
-        onProgress('preparing', 10 + ((pairIndex + 1) / PDF_PAGE_PAIRS.length) * 30);
+        // Actualizar progreso de preparación por hoja compuesta
+        onProgress('preparing', 10 + ((pairIndex + 1) / SHEET_PAGE_PAIRS.length) * 30);
       }
 
-      // Generar el PDF como blob
-      const pdfBlob = pdf.output('blob');
-      const fileName = `Fotobook_${userData.cedula}_${new Date().getTime()}.pdf`;
+      onProgress('preparing', 45);
 
-      onProgress('preparing', 40);
+      const optimizedZip = await createOptimizedZipForTarget(sheetSources, userData.cedula);
+      const zipBlob = optimizedZip.zipBlob;
 
-      // Solo enviar a administrador en segundo plano (invisible para usuario)
-      onProgress('admin-email', 50);
+      console.log(
+        `ZIP optimizado: ${(optimizedZip.zipSizeBytes / (1024 * 1024)).toFixed(2)} MB | DPI ${optimizedZip.dpi} | calidad ${optimizedZip.quality.toFixed(3)}`
+      );
+
+      onProgress('preparing', 60);
+      const fileName = `Fotobook_${userData.cedula}_${new Date().getTime()}.zip`;
+
+      onProgress('admin-email', 65);
       try {
-        await sendPDFByEmail(pdfBlob, userData, fileName);
-        onProgress('admin-email', 70);
-      } catch (adminError) {
-        // No bloquear descarga si falla envío admin
+        await sendZipByEmail(zipBlob, exportData, fileName);
+      } catch (emailError) {
+        console.warn('No se pudo enviar el link por email, continuando con descarga local.', emailError);
       }
 
-      // Descargar PDF localmente (acción principal)
+      onProgress('admin-email', 75);
+
+      const downloadUrl = URL.createObjectURL(zipBlob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+
       onProgress('downloading', 80);
-      await new Promise(resolve => setTimeout(resolve, 300)); // Pausa visual más corta
-      
-      pdf.save(fileName);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(downloadUrl);
+
       onProgress('downloading', 100);
 
     } catch (error) {
@@ -221,118 +230,28 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
     }
   };
 
-  const loadImageForPDF = async (
-    imageDataUrl: string
-  ): Promise<HTMLImageElement> => {
-    return new Promise((resolve, reject) => {
-      const image = new Image();
-
-      image.onload = () => resolve(image);
-      image.onerror = () => reject(new Error('No se pudo cargar la imagen para exportar PDF.'));
-      image.src = imageDataUrl;
-    });
-  };
-
-  const createSpreadImageForPDF = async (
-    leftImageDataUrl: string,
-    rightImageDataUrl: string
-  ): Promise<string> => {
-    const [leftImage, rightImage] = await Promise.all([
-      loadImageForPDF(leftImageDataUrl),
-      loadImageForPDF(rightImageDataUrl),
-    ]);
-
-    return new Promise((resolve, reject) => {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-
-      if (!ctx) {
-        reject(new Error('No se pudo crear el canvas de exportación.'));
-        return;
-      }
-
-      const outputWidth = Math.round((PDF_SHEET_WIDTH_MM / 25.4) * PDF_EXPORT_DPI);
-      const outputHeight = Math.round((PDF_SHEET_HEIGHT_MM / 25.4) * PDF_EXPORT_DPI);
-      const leftAspectRatio = leftImage.width / leftImage.height;
-      const rightAspectRatio = rightImage.width / rightImage.height;
-
-      canvas.width = outputWidth;
-      canvas.height = outputHeight;
-
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-
-      // Conserva la proporción original del lienzo y deja la diferencia solo en la unión central.
-      const pageHeight = outputHeight;
-      const leftPageWidth = Math.round(pageHeight * leftAspectRatio);
-      const rightPageWidth = Math.round(pageHeight * rightAspectRatio);
-      const remainingGap = Math.max(0, outputWidth - leftPageWidth - rightPageWidth);
-      const leftGapWidth = Math.floor(remainingGap / 2);
-      const rightGapWidth = remainingGap - leftGapWidth;
-      const rightPageX = outputWidth - rightPageWidth;
-
-      ctx.drawImage(leftImage, 0, 0, leftPageWidth, pageHeight);
-
-      if (leftGapWidth > 0) {
-        ctx.drawImage(
-          leftImage,
-          leftImage.width - 1,
-          0,
-          1,
-          leftImage.height,
-          leftPageWidth,
-          0,
-          leftGapWidth,
-          pageHeight
-        );
-      }
-
-      if (rightGapWidth > 0) {
-        ctx.drawImage(
-          rightImage,
-          0,
-          0,
-          1,
-          rightImage.height,
-          leftPageWidth + leftGapWidth,
-          0,
-          rightGapWidth,
-          pageHeight
-        );
-      }
-
-      ctx.drawImage(rightImage, rightPageX, 0, rightPageWidth, pageHeight);
-
-      resolve(canvas.toDataURL('image/jpeg', 0.92));
-    });
-  };
-
-  // Enviar PDF por correo (solo administrador en segundo plano)
-  const sendPDFByEmail = async (
-    pdfBlob: Blob, 
-    userData: {cedula: string, celular: string, direccion: string}, 
+  const sendZipByEmail = async (
+    zipBlob: Blob,
+    exportData: {direccion: string},
     fileName: string
   ) => {
-    // Validar tamaño del PDF (máximo 200MB - Pixeldrain soporta hasta 5GB)
-    const pdfSizeMB = pdfBlob.size / (1024 * 1024);
-    if (pdfSizeMB > 200) {
-      throw new Error(`El PDF es demasiado grande (${pdfSizeMB.toFixed(2)}MB). Máximo permitido: 200MB`);
+    const zipSizeMB = zipBlob.size / (1024 * 1024);
+    if (zipSizeMB > 200) {
+      throw new Error(`El ZIP es demasiado grande (${zipSizeMB.toFixed(2)}MB). Máximo permitido: 200MB`);
     }
 
-    // Convertir blob a base64
     const reader = new FileReader();
     const base64Promise = new Promise<string>((resolve, reject) => {
       reader.onloadend = () => {
         const base64 = reader.result as string;
-        resolve(base64.split(',')[1]); // Remover el prefijo "data:..."
+        resolve(base64.split(',')[1]);
       };
       reader.onerror = reject;
-      reader.readAsDataURL(pdfBlob);
+      reader.readAsDataURL(zipBlob);
     });
 
-    const base64PDF = await base64Promise;
+    const zipBase64 = await base64Promise;
 
-    // Enviar al backend con timeout de 5 minutos para archivos muy grandes
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 300000); // 5 minutos
 
@@ -344,14 +263,15 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          pdfBase64: base64PDF,
-          fileName: fileName,
+          zipBase64,
+          fileName,
+          mimeType: 'application/zip',
           userData: {
             cedula: userData.cedula,
             celular: userData.celular,
-            email: 'admin@fotobook.com', // Email dummy para admin
-            direccion: userData.direccion
-          }
+            email: userData.email,
+            direccion: exportData.direccion,
+          },
         }),
       });
 
@@ -359,16 +279,213 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || `Error al procesar el fotobook`);
+        throw new Error(errorData.message || 'Error al enviar ZIP por correo');
       }
-
     } catch (error: any) {
       clearTimeout(timeout);
       if (error.name === 'AbortError') {
-        throw new Error('Tiempo de espera agotado. El archivo es muy grande o la conexión es lenta. Inténtalo de nuevo.');
+        throw new Error('Tiempo de espera agotado al enviar ZIP por correo.');
       }
       throw error;
     }
+  };
+
+  const loadImageForJPG = async (
+    imageDataUrl: string
+  ): Promise<HTMLImageElement> => {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('No se pudo cargar la imagen para exportar JPG.'));
+      image.src = imageDataUrl;
+    });
+  };
+
+  const canvasToJpegBlob = async (canvas: HTMLCanvasElement, quality: number): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            reject(new Error('No se pudo convertir el canvas a JPG.'));
+            return;
+          }
+
+          resolve(blob);
+        },
+        'image/jpeg',
+        quality
+      );
+    });
+  };
+
+  const renderSpreadCanvas = (
+    leftImage: HTMLImageElement,
+    rightImage: HTMLImageElement,
+    dpi: number
+  ): HTMLCanvasElement => {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    if (!ctx) {
+      throw new Error('No se pudo crear el canvas de exportación.');
+    }
+
+    const outputWidth = Math.round((SHEET_WIDTH_MM / 25.4) * dpi);
+    const outputHeight = Math.round((SHEET_HEIGHT_MM / 25.4) * dpi);
+    const contentWidth = Math.round((CONTENT_WIDTH_MM / 25.4) * dpi);
+    const contentHeight = Math.round((CONTENT_HEIGHT_MM / 25.4) * dpi);
+    const contentX = Math.round((outputWidth - contentWidth) / 2);
+    const contentY = Math.round((outputHeight - contentHeight) / 2);
+    const leftAspectRatio = leftImage.width / leftImage.height;
+    const rightAspectRatio = rightImage.width / rightImage.height;
+
+    canvas.width = outputWidth;
+    canvas.height = outputHeight;
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+
+    // Mantener un margen blanco en la hoja final (30x45 total, 29x43 útil).
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, outputWidth, outputHeight);
+
+    // Conserva la proporción original del lienzo y deja la diferencia solo en la unión central.
+    const pageHeight = contentHeight;
+    const leftPageWidth = Math.round(pageHeight * leftAspectRatio);
+    const rightPageWidth = Math.round(pageHeight * rightAspectRatio);
+    const remainingGap = Math.max(0, contentWidth - leftPageWidth - rightPageWidth);
+    const leftGapWidth = Math.floor(remainingGap / 2);
+    const rightGapWidth = remainingGap - leftGapWidth;
+    const rightPageX = contentX + contentWidth - rightPageWidth;
+
+    ctx.drawImage(leftImage, contentX, contentY, leftPageWidth, pageHeight);
+
+    if (leftGapWidth > 0) {
+      ctx.drawImage(
+        leftImage,
+        leftImage.width - 1,
+        0,
+        1,
+        leftImage.height,
+        contentX + leftPageWidth,
+        contentY,
+        leftGapWidth,
+        pageHeight
+      );
+    }
+
+    if (rightGapWidth > 0) {
+      ctx.drawImage(
+        rightImage,
+        0,
+        0,
+        1,
+        rightImage.height,
+        contentX + leftPageWidth + leftGapWidth,
+        contentY,
+        rightGapWidth,
+        pageHeight
+      );
+    }
+
+    ctx.drawImage(rightImage, rightPageX, contentY, rightPageWidth, pageHeight);
+
+    return canvas;
+  };
+
+  const buildZipFromRenderedSheets = async (
+    renderedSheets: Array<{ sheetNumber: number; canvas: HTMLCanvasElement }>,
+    cedula: string,
+    quality: number,
+    dpi: number
+  ): Promise<ZipBuildResult> => {
+    const zip = new JSZip();
+
+    for (const sheet of renderedSheets) {
+      const jpgBlob = await canvasToJpegBlob(sheet.canvas, quality);
+      zip.file(`hoja_${sheet.sheetNumber}_${cedula}.jpg`, jpgBlob);
+    }
+
+    const zipBlob = await zip.generateAsync({
+      type: 'blob',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 },
+    });
+
+    return {
+      zipBlob,
+      zipSizeBytes: zipBlob.size,
+      dpi,
+      quality,
+    };
+  };
+
+  const createOptimizedZipForTarget = async (
+    sheetSources: SheetSource[],
+    cedula: string
+  ): Promise<ZipBuildResult> => {
+    const loadedSheets: LoadedSheetSource[] = await Promise.all(
+      sheetSources.map(async (sheet) => ({
+        sheetNumber: sheet.sheetNumber,
+        leftImage: await loadImageForJPG(sheet.leftPreviewImage),
+        rightImage: await loadImageForJPG(sheet.rightPreviewImage),
+      }))
+    );
+
+    for (const dpi of EXPORT_DPI_CANDIDATES) {
+      const renderedSheets = loadedSheets.map((sheet) => ({
+        sheetNumber: sheet.sheetNumber,
+        canvas: renderSpreadCanvas(sheet.leftImage, sheet.rightImage, dpi),
+      }));
+
+      const maxQualityZip = await buildZipFromRenderedSheets(
+        renderedSheets,
+        cedula,
+        JPEG_MAX_QUALITY,
+        dpi
+      );
+
+      if (maxQualityZip.zipSizeBytes <= TARGET_ZIP_SIZE_BYTES) {
+        return maxQualityZip;
+      }
+
+      const minQualityZip = await buildZipFromRenderedSheets(
+        renderedSheets,
+        cedula,
+        JPEG_MIN_QUALITY,
+        dpi
+      );
+
+      if (minQualityZip.zipSizeBytes > TARGET_ZIP_SIZE_BYTES) {
+        continue;
+      }
+
+      let low = JPEG_MIN_QUALITY;
+      let high = JPEG_MAX_QUALITY;
+      let bestFit = minQualityZip;
+
+      for (let i = 0; i < 8; i++) {
+        const midQuality = (low + high) / 2;
+        const candidateZip = await buildZipFromRenderedSheets(
+          renderedSheets,
+          cedula,
+          midQuality,
+          dpi
+        );
+
+        if (candidateZip.zipSizeBytes <= TARGET_ZIP_SIZE_BYTES) {
+          bestFit = candidateZip;
+          low = midQuality;
+        } else {
+          high = midQuality;
+        }
+      }
+
+      return bestFit;
+    }
+
+    throw new Error('No fue posible dejar el ZIP final en 8MB. Intenta reducir contenido en las páginas.');
   };
 
   return (
@@ -392,7 +509,7 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
                     ? 'bg-[#39FF14] text-[#003300] hover:bg-[#66FF44] shadow-md hover:shadow-lg'
                     : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                 }`}
-                title={areAllPagesComplete() ? 'Generar PDF final' : 'Completa todas las páginas primero'}
+                title={areAllPagesComplete() ? 'Generar ZIP final' : 'Completa todas las páginas primero'}
               >
                 {areAllPagesComplete() && <CheckCircle2 className="w-5 h-5" />}
                 Finalizar
@@ -566,7 +683,7 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
 
         {/* Info */}
         <div className="text-center text-[#6B7280] font-bebas text-sm">
-          <p>Total: 6 páginas | Máximo 40 fotos por página</p>
+          <p>Total: 6 páginas | Máximo 42 fotos por página</p>
         </div>
       </div>
 
