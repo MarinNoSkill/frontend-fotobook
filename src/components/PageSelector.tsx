@@ -33,6 +33,7 @@ interface UserData {
   cedula: string;
   celular: string;
   email: string;
+  nombre?: string;
   direccion?: string; // Opcional hasta que se complete
   otpVerified: boolean;
 }
@@ -41,12 +42,16 @@ interface SheetSource {
   sheetNumber: number;
   leftPageId: number;
   rightPageId: number;
+  leftMarginColor: string;
+  rightMarginColor: string;
   leftPreviewImage: string;
   rightPreviewImage: string;
 }
 
 interface LoadedSheetSource {
   sheetNumber: number;
+  leftMarginColor: string;
+  rightMarginColor: string;
   leftImage: HTMLImageElement;
   rightImage: HTMLImageElement;
 }
@@ -93,6 +98,7 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
   const CONTENT_WIDTH_MM = 430; // 43 cm útiles
   const CONTENT_HEIGHT_MM = 280; // 28 cm útiles
   const TARGET_ZIP_SIZE_BYTES = 8 * 1024 * 1024;
+  const DEFAULT_SHEET_MARGIN_COLOR = '#D4AF37';
   const JPEG_MIN_QUALITY = 0.62;
   const JPEG_MAX_QUALITY = 1;
   const EXPORT_DPI_CANDIDATES = [340, 320, 300, 280, 260, 240, 220, 200, 180, 160, 140, 130, 120, 110, 100];
@@ -156,6 +162,25 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
     return true;
   };
 
+  const normalizeFileToken = (value: string): string => {
+    const normalized = value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .toLowerCase();
+
+    return normalized || 'sin_nombre';
+  };
+
+  const getFilePrefix = (): string => {
+    const cedulaToken = normalizeFileToken(userData.cedula || 'sin_cedula');
+    const rawName = userData.nombre?.trim() || userData.email.split('@')[0] || 'sin_nombre';
+    const nameToken = normalizeFileToken(rawName);
+
+    return `${cedulaToken}_${nameToken}`;
+  };
+
   // Generar y descargar ZIP con 3 hojas JPG (45cm x 30cm cada hoja)
   const handleGeneratePDF = async (
     exportData: {direccion: string}, 
@@ -183,6 +208,8 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
           sheetNumber: pairIndex + 1,
           leftPageId,
           rightPageId,
+          leftMarginColor: leftPage.backgroundColor || DEFAULT_SHEET_MARGIN_COLOR,
+          rightMarginColor: rightPage.backgroundColor || DEFAULT_SHEET_MARGIN_COLOR,
           leftPreviewImage: leftPage.previewImage,
           rightPreviewImage: rightPage.previewImage,
         });
@@ -193,7 +220,8 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
 
       onProgress('preparing', 45);
 
-      const optimizedZip = await createOptimizedZipForTarget(sheetSources, userData.cedula);
+      const filePrefix = getFilePrefix();
+      const optimizedZip = await createOptimizedZipForTarget(sheetSources, filePrefix);
       const zipBlob = optimizedZip.zipBlob;
 
       console.log(
@@ -201,7 +229,7 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
       );
 
       onProgress('preparing', 60);
-      const fileName = `Fotobook_${userData.cedula}_${new Date().getTime()}.zip`;
+      const fileName = `${filePrefix}_${new Date().getTime()}.zip`;
 
       onProgress('admin-email', 65);
       try {
@@ -270,6 +298,7 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
             cedula: userData.cedula,
             celular: userData.celular,
             email: userData.email,
+            nombre: userData.nombre,
             direccion: exportData.direccion,
           },
         }),
@@ -322,6 +351,8 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
   const renderSpreadCanvas = (
     leftImage: HTMLImageElement,
     rightImage: HTMLImageElement,
+    leftMarginColor: string,
+    rightMarginColor: string,
     dpi: number
   ): HTMLCanvasElement => {
     const canvas = document.createElement('canvas');
@@ -346,48 +377,23 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
 
-    // Mantener un margen blanco en la hoja final (30x45 total, 29x43 útil).
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(0, 0, outputWidth, outputHeight);
-
     // Conserva la proporción original del lienzo y deja la diferencia solo en la unión central.
     const pageHeight = contentHeight;
     const leftPageWidth = Math.round(pageHeight * leftAspectRatio);
     const rightPageWidth = Math.round(pageHeight * rightAspectRatio);
     const remainingGap = Math.max(0, contentWidth - leftPageWidth - rightPageWidth);
     const leftGapWidth = Math.floor(remainingGap / 2);
-    const rightGapWidth = remainingGap - leftGapWidth;
     const rightPageX = contentX + contentWidth - rightPageWidth;
+    const seamX = contentX + leftPageWidth + leftGapWidth;
+    const splitX = Math.min(outputWidth, Math.max(0, seamX));
+
+    // El margen exterior se reparte por lado, respetando el color de cada página.
+    ctx.fillStyle = leftMarginColor;
+    ctx.fillRect(0, 0, splitX, outputHeight);
+    ctx.fillStyle = rightMarginColor;
+    ctx.fillRect(splitX, 0, outputWidth - splitX, outputHeight);
 
     ctx.drawImage(leftImage, contentX, contentY, leftPageWidth, pageHeight);
-
-    if (leftGapWidth > 0) {
-      ctx.drawImage(
-        leftImage,
-        leftImage.width - 1,
-        0,
-        1,
-        leftImage.height,
-        contentX + leftPageWidth,
-        contentY,
-        leftGapWidth,
-        pageHeight
-      );
-    }
-
-    if (rightGapWidth > 0) {
-      ctx.drawImage(
-        rightImage,
-        0,
-        0,
-        1,
-        rightImage.height,
-        contentX + leftPageWidth + leftGapWidth,
-        contentY,
-        rightGapWidth,
-        pageHeight
-      );
-    }
 
     ctx.drawImage(rightImage, rightPageX, contentY, rightPageWidth, pageHeight);
 
@@ -396,7 +402,7 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
 
   const buildZipFromRenderedSheets = async (
     renderedSheets: Array<{ sheetNumber: number; canvas: HTMLCanvasElement }>,
-    cedula: string,
+    filePrefix: string,
     quality: number,
     dpi: number
   ): Promise<ZipBuildResult> => {
@@ -404,7 +410,7 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
 
     for (const sheet of renderedSheets) {
       const jpgBlob = await canvasToJpegBlob(sheet.canvas, quality);
-      zip.file(`hoja_${sheet.sheetNumber}_${cedula}.jpg`, jpgBlob);
+      zip.file(`${filePrefix}_hoja${sheet.sheetNumber}.jpg`, jpgBlob);
     }
 
     const zipBlob = await zip.generateAsync({
@@ -423,11 +429,13 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
 
   const createOptimizedZipForTarget = async (
     sheetSources: SheetSource[],
-    cedula: string
+    filePrefix: string
   ): Promise<ZipBuildResult> => {
     const loadedSheets: LoadedSheetSource[] = await Promise.all(
       sheetSources.map(async (sheet) => ({
         sheetNumber: sheet.sheetNumber,
+        leftMarginColor: sheet.leftMarginColor,
+        rightMarginColor: sheet.rightMarginColor,
         leftImage: await loadImageForJPG(sheet.leftPreviewImage),
         rightImage: await loadImageForJPG(sheet.rightPreviewImage),
       }))
@@ -436,12 +444,18 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
     for (const dpi of EXPORT_DPI_CANDIDATES) {
       const renderedSheets = loadedSheets.map((sheet) => ({
         sheetNumber: sheet.sheetNumber,
-        canvas: renderSpreadCanvas(sheet.leftImage, sheet.rightImage, dpi),
+        canvas: renderSpreadCanvas(
+          sheet.leftImage,
+          sheet.rightImage,
+          sheet.leftMarginColor,
+          sheet.rightMarginColor,
+          dpi
+        ),
       }));
 
       const maxQualityZip = await buildZipFromRenderedSheets(
         renderedSheets,
-        cedula,
+        filePrefix,
         JPEG_MAX_QUALITY,
         dpi
       );
@@ -452,7 +466,7 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
 
       const minQualityZip = await buildZipFromRenderedSheets(
         renderedSheets,
-        cedula,
+        filePrefix,
         JPEG_MIN_QUALITY,
         dpi
       );
@@ -469,7 +483,7 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
         const midQuality = (low + high) / 2;
         const candidateZip = await buildZipFromRenderedSheets(
           renderedSheets,
-          cedula,
+          filePrefix,
           midQuality,
           dpi
         );
