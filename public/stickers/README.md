@@ -1,4 +1,4 @@
-# Stickers para Fotobook
+# Stickers para Photobook
 
 Esta carpeta contiene los stickers disponibles para usar en el editor de páginas.
 

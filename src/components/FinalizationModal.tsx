@@ -78,7 +78,7 @@ export const FinalizationModal: React.FC<FinalizationModalProps> = ({ onClose, o
                   Listo para Descargar
                 </h3>
                 <p className="text-sm font-bebas text-[#6B7280]">
-                  Completa tu dirección para generar el fotobook
+                  Completa tu dirección para generar el photobook
                 </p>
               </div>
 
@@ -145,7 +145,7 @@ export const FinalizationModal: React.FC<FinalizationModalProps> = ({ onClose, o
               </div>
 
               <h3 className="text-2xl font-bausch text-[#003300] mb-2">
-                Fotobook Procesado
+                Photobook Procesado
               </h3>
               <p className="text-sm font-bebas text-[#6B7280] mb-1">
                 Tus 3 hojas JPG en alta calidad se descargaron correctamente en un ZIP

@@ -58,7 +58,7 @@ const useImageLoader = (src: string): [HTMLImageElement | null] => {
   return [image];
 };
 
-// Preset aspect ratios comunes para fotobooks
+// Preset aspect ratios comunes para photobooks
 const ASPECT_RATIOS = [
   { name: 'Libre', value: undefined },
   { name: '1:1', value: 1 },

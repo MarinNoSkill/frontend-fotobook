@@ -180,7 +180,7 @@ export function setupBraveFallbacks(capabilities: BrowserCapabilities): void {
     (window as any).fallbackStorage = {
       setItem: (key: string, value: any) => {
         try {
-          localStorage.setItem(`fotobook_${key}`, JSON.stringify(value));
+          localStorage.setItem(`photobook_${key}`, JSON.stringify(value));
           return true;
         } catch (e) {
           console.error('Error saving to localStorage fallback:', e);
@@ -189,7 +189,7 @@ export function setupBraveFallbacks(capabilities: BrowserCapabilities): void {
       },
       getItem: (key: string) => {
         try {
-          const item = localStorage.getItem(`fotobook_${key}`);
+          const item = localStorage.getItem(`photobook_${key}`);
           return item ? JSON.parse(item) : null;
         } catch (e) {
           console.error('Error reading from localStorage fallback:', e);
@@ -198,7 +198,7 @@ export function setupBraveFallbacks(capabilities: BrowserCapabilities): void {
       },
       removeItem: (key: string) => {
         try {
-          localStorage.removeItem(`fotobook_${key}`);
+          localStorage.removeItem(`photobook_${key}`);
           return true;
         } catch (e) {
           console.error('Error removing from localStorage fallback:', e);

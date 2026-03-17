@@ -55,7 +55,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginRequest }) => {
             Party Class
           </h1>
           <p className="text-sm font-bebas text-[#6B7280] tracking-widest mt-4">
-            FOTOBOOK
+            PHOTOBOOK
           </p>
         </div>
 

@@ -53,7 +53,7 @@ export interface PageData {
   customBorderSize?: number; // Grosor personalizable del borde
 }
 
-const DB_NAME = 'FotoBookDB';
+const DB_NAME = 'PhotoBookDB';
 const DB_VERSION = 1;
 const STORE_NAME = 'pages';
 
@@ -151,7 +151,7 @@ export const usePageCache = () => {
             lastEdited: Date.now(),
           };
           
-          localStorage.setItem(`fotobook_page_${pageId}`, JSON.stringify(pageData));
+          localStorage.setItem(`photobook_page_${pageId}`, JSON.stringify(pageData));
           console.log(`💾 Página ${pageId} guardada en localStorage (fallback)`);
           return true;
         } catch (error) {
@@ -199,7 +199,7 @@ export const usePageCache = () => {
       // Fallback para localStorage cuando IndexedDB esté bloqueado (Brave)
       if (useFallback) {
         try {
-          const stored = localStorage.getItem(`fotobook_page_${pageId}`);
+          const stored = localStorage.getItem(`photobook_page_${pageId}`);
           if (stored) {
             console.log(`📖 Página ${pageId} cargada desde localStorage (fallback)`);
             return JSON.parse(stored);
@@ -231,7 +231,7 @@ export const usePageCache = () => {
       // Fallback para localStorage cuando IndexedDB esté bloqueado (Brave)
       if (useFallback) {
         try {
-          localStorage.removeItem(`fotobook_page_${pageId}`);
+          localStorage.removeItem(`photobook_page_${pageId}`);
           console.log(`🗑️ Página ${pageId} eliminada de localStorage (fallback)`);
           return true;
         } catch (error) {
@@ -262,7 +262,7 @@ export const usePageCache = () => {
         const pages: PageData[] = [];
         for (let i = 0; i < localStorage.length; i++) {
           const key = localStorage.key(i);
-          if (key && key.startsWith('fotobook_page_')) {
+          if (key && key.startsWith('photobook_page_')) {
             const stored = localStorage.getItem(key);
             if (stored) {
               pages.push(JSON.parse(stored));
@@ -297,7 +297,7 @@ export const usePageCache = () => {
         const keysToDelete: string[] = [];
         for (let i = 0; i < localStorage.length; i++) {
           const key = localStorage.key(i);
-          if (key && key.startsWith('fotobook_page_')) {
+          if (key && key.startsWith('photobook_page_')) {
             keysToDelete.push(key);
           }
         }

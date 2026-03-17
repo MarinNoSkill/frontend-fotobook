@@ -97,11 +97,10 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
   const SHEET_HEIGHT_MM = 300;
   const CONTENT_WIDTH_MM = 430; // 43 cm útiles
   const CONTENT_HEIGHT_MM = 280; // 28 cm útiles
-  const TARGET_ZIP_SIZE_BYTES = 8 * 1024 * 1024;
+  const TARGET_ZIP_SIZE_BYTES = 4 * 1024 * 1024;
   const DEFAULT_SHEET_MARGIN_COLOR = '#D4AF37';
-  const JPEG_MIN_QUALITY = 0.62;
   const JPEG_MAX_QUALITY = 1;
-  const EXPORT_DPI_CANDIDATES = [340, 320, 300, 280, 260, 240, 220, 200, 180, 160, 140, 130, 120, 110, 100];
+  const EXPORT_DPI_CANDIDATES = [96];
   const SHEET_PAGE_PAIRS: Array<[number, number]> = [
     [6, 1],
     [2, 3],
@@ -453,53 +452,19 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
         ),
       }));
 
-      const maxQualityZip = await buildZipFromRenderedSheets(
+      const fixedQualityZip = await buildZipFromRenderedSheets(
         renderedSheets,
         filePrefix,
         JPEG_MAX_QUALITY,
         dpi
       );
 
-      if (maxQualityZip.zipSizeBytes <= TARGET_ZIP_SIZE_BYTES) {
-        return maxQualityZip;
+      if (fixedQualityZip.zipSizeBytes <= TARGET_ZIP_SIZE_BYTES) {
+        return fixedQualityZip;
       }
-
-      const minQualityZip = await buildZipFromRenderedSheets(
-        renderedSheets,
-        filePrefix,
-        JPEG_MIN_QUALITY,
-        dpi
-      );
-
-      if (minQualityZip.zipSizeBytes > TARGET_ZIP_SIZE_BYTES) {
-        continue;
-      }
-
-      let low = JPEG_MIN_QUALITY;
-      let high = JPEG_MAX_QUALITY;
-      let bestFit = minQualityZip;
-
-      for (let i = 0; i < 8; i++) {
-        const midQuality = (low + high) / 2;
-        const candidateZip = await buildZipFromRenderedSheets(
-          renderedSheets,
-          filePrefix,
-          midQuality,
-          dpi
-        );
-
-        if (candidateZip.zipSizeBytes <= TARGET_ZIP_SIZE_BYTES) {
-          bestFit = candidateZip;
-          low = midQuality;
-        } else {
-          high = midQuality;
-        }
-      }
-
-      return bestFit;
     }
 
-    throw new Error('No fue posible dejar el ZIP final en 8MB. Intenta reducir contenido en las páginas.');
+    throw new Error('No fue posible dejar el ZIP final en 4MB sin bajar la calidad. Intenta reducir contenido en las páginas.');
   };
 
   return (
