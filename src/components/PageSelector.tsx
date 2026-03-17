@@ -99,7 +99,9 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
   const CONTENT_HEIGHT_MM = 280; // 28 cm útiles
   const TARGET_ZIP_SIZE_BYTES = 4 * 1024 * 1024;
   const DEFAULT_SHEET_MARGIN_COLOR = '#D4AF37';
+  const JPEG_MIN_QUALITY = 0.35;
   const JPEG_MAX_QUALITY = 1;
+  const JPEG_QUALITY_SEARCH_STEPS = 8;
   const EXPORT_DPI_CANDIDATES = [96];
   const SHEET_PAGE_PAIRS: Array<[number, number]> = [
     [6, 1],
@@ -462,9 +464,45 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
       if (fixedQualityZip.zipSizeBytes <= TARGET_ZIP_SIZE_BYTES) {
         return fixedQualityZip;
       }
+
+      const minQualityZip = await buildZipFromRenderedSheets(
+        renderedSheets,
+        filePrefix,
+        JPEG_MIN_QUALITY,
+        dpi
+      );
+
+      // Si ni con la compresión mínima configurable baja de 4MB,
+      // se exporta igualmente con el menor peso posible sin tocar resolución.
+      if (minQualityZip.zipSizeBytes > TARGET_ZIP_SIZE_BYTES) {
+        return minQualityZip;
+      }
+
+      let low = JPEG_MIN_QUALITY;
+      let high = JPEG_MAX_QUALITY;
+      let bestFit = minQualityZip;
+
+      for (let i = 0; i < JPEG_QUALITY_SEARCH_STEPS; i++) {
+        const midQuality = (low + high) / 2;
+        const candidateZip = await buildZipFromRenderedSheets(
+          renderedSheets,
+          filePrefix,
+          midQuality,
+          dpi
+        );
+
+        if (candidateZip.zipSizeBytes <= TARGET_ZIP_SIZE_BYTES) {
+          bestFit = candidateZip;
+          low = midQuality;
+        } else {
+          high = midQuality;
+        }
+      }
+
+      return bestFit;
     }
 
-    throw new Error('No fue posible dejar el ZIP final en 4MB sin bajar la calidad. Intenta reducir contenido en las páginas.');
+    throw new Error('No fue posible generar el ZIP final. Intenta de nuevo.');
   };
 
   return (
