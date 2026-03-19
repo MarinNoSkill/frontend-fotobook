@@ -6,13 +6,16 @@ export interface LayoutOption {
 
 const PAGE_WIDTH = 831;
 const PAGE_HEIGHT = 1141;
+const PIXELS_PER_CM = 37.8;
+const MULTI_LAYOUT_BORDER_CM = 1.5;
+const MULTI_LAYOUT_BORDER_PX = PIXELS_PER_CM * MULTI_LAYOUT_BORDER_CM;
 
 // Calcular el grosor del borde basado en la cantidad de fotos
 const getBorderWidth = (count: number): number => {
-  if (count > 20) {
-    return 18.9; // ~0.5cm para más de 20 fotos
+  if (count >= 2 && count <= 42) {
+    return MULTI_LAYOUT_BORDER_PX; // 1.5cm para layouts de 2 a 42 fotos
   }
-  return 37.8; // ~1cm para 20 o menos fotos
+  return PIXELS_PER_CM; // ~1cm para página individual
 };
 
 const createExactGridPositions = (

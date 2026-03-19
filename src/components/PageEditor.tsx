@@ -1453,11 +1453,12 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   // TAMAÑO FIJO DEL CANVAS TOTAL (siempre igual con o sin borde)
   const TOTAL_CANVAS_WIDTH = 871; // 22cm + borde máximo
   const TOTAL_CANVAS_HEIGHT = 1181; // 30.2cm + borde máximo
+  const MULTI_LAYOUT_BORDER_SIZE = 56.7; // 1.5cm (37.8px por cm)
   
   // BORDER_SIZE: Marco que va ENCIMA del lienzo
   // Para múltiples compartimentos, usar valor más delgado para líneas finas  
   // Para página individual, usar valor personalizable del usuario
-  const BORDER_SIZE = noBorders ? 0 : (photoCount > 1 ? 20 : customBorderSize);
+  const BORDER_SIZE = noBorders ? 0 : (photoCount > 1 ? MULTI_LAYOUT_BORDER_SIZE : customBorderSize);
   
   // Área disponible para fotos (cambia según el borde)
   const PAGE_WIDTH = TOTAL_CANVAS_WIDTH - (BORDER_SIZE * 2);
