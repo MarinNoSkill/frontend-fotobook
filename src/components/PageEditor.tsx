@@ -1450,19 +1450,19 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   const [noBorders, setNoBorders] = useState(false); // Sin bordes (invertido)
   const [customBorderSize, setCustomBorderSize] = useState(20); // Grosor personalizable (0-100px)
 
-  // TAMAÑO FIJO DEL CANVAS TOTAL (siempre igual con o sin borde)
-  const TOTAL_CANVAS_WIDTH = 871; // 22cm + borde máximo
-  const TOTAL_CANVAS_HEIGHT = 1181; // 30.2cm + borde máximo
+  // TAMAÑO FIJO DEL ÁREA INTERNA (coincide con photoLayouts.ts)
+  const PAGE_WIDTH = 831;
+  const PAGE_HEIGHT = 1141;
   const MULTI_LAYOUT_BORDER_SIZE = 56.7; // 1.5cm (37.8px por cm)
-  
-  // BORDER_SIZE: Marco que va ENCIMA del lienzo
-  // Para múltiples compartimentos, usar valor más delgado para líneas finas  
-  // Para página individual, usar valor personalizable del usuario
+
+  // BORDER_SIZE: Marco que va alrededor del área interna fija.
+  // Para múltiples compartimentos, usar valor más delgado para líneas finas.
+  // Para página individual, usar valor personalizable del usuario.
   const BORDER_SIZE = noBorders ? 0 : (photoCount > 1 ? MULTI_LAYOUT_BORDER_SIZE : customBorderSize);
-  
-  // Área disponible para fotos (cambia según el borde)
-  const PAGE_WIDTH = TOTAL_CANVAS_WIDTH - (BORDER_SIZE * 2);
-  const PAGE_HEIGHT = TOTAL_CANVAS_HEIGHT - (BORDER_SIZE * 2);
+
+  // El canvas total se deriva del área interna + marco para mantener centrado el layout.
+  const TOTAL_CANVAS_WIDTH = PAGE_WIDTH + (BORDER_SIZE * 2);
+  const TOTAL_CANVAS_HEIGHT = PAGE_HEIGHT + (BORDER_SIZE * 2);
   
   // Obtener el layout seleccionado con el BORDER_SIZE actual
   const selectedLayout = useMemo(() => {
