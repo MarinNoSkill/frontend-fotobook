@@ -31,6 +31,9 @@ interface EditedPage {
 }
 
 function App() {
+  // Flag temporal para deshabilitar todo el flujo de login/OTP
+  const DISABLE_AUTH = true;
+
   const [appState, setAppState] = useState<AppState>('login');
   const [userData, setUserData] = useState<UserData | null>(null);
   const [emailUserId, setEmailUserId] = useState('');
@@ -46,6 +49,22 @@ function App() {
   // Verificar si el token sigue siendo válido al cargar la página
   useEffect(() => {
     const validateUserSession = async () => {
+      // Modo sin autenticación: entrar directamente al editor con un usuario ficticio
+      if (DISABLE_AUTH) {
+        const demoUser: UserData = {
+          id: 'demo-user',
+          cedula: '0000000000',
+          celular: '0000000000',
+          email: 'demo@example.com',
+          otpVerified: true,
+        };
+
+        setUserData(demoUser);
+        setAppState('editor-pages');
+        setLoading(false);
+        return;
+      }
+
       const token = localStorage.getItem('authToken');
       
       if (token) {

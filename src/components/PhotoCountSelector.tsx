@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, ChevronLeft } from 'lucide-react';
-import { getLayoutsForCount, getBorderWidth } from '../utils/photoLayouts';
+import { getLayoutsForCount, getBorderWidth, getInternalBorderWidth } from '../utils/photoLayouts';
 
 interface PhotoCountSelectorProps {
   onSelect: (count: number, layoutId: string) => void;
@@ -19,8 +19,9 @@ export const PhotoCountSelector: React.FC<PhotoCountSelectorProps> = ({ onSelect
 
   const handleCountSelect = (count: number) => {
     setSelectedCount(count);
-    const borderWidth = getBorderWidth(count);
-    const layouts = getLayoutsForCount(count, borderWidth);
+    // Para seleccionar el layout usamos el borde INTERNO (separación entre fotos)
+    const internalBorderWidth = getInternalBorderWidth(count);
+    const layouts = getLayoutsForCount(count, internalBorderWidth);
     if (layouts.length === 1) {
       // Si solo hay un layout, seleccionarlo automáticamente
       onSelect(count, layouts[0].id);
@@ -39,8 +40,12 @@ export const PhotoCountSelector: React.FC<PhotoCountSelectorProps> = ({ onSelect
     setSelectedCount(null);
   };
 
+  // BORDER_SIZE controla el marco exterior de la previsualización (1.5 cm en multi-foto)
   const BORDER_SIZE = selectedCount ? getBorderWidth(selectedCount) : 37.8;
-  const currentLayouts = selectedCount ? getLayoutsForCount(selectedCount, BORDER_SIZE) : [];
+  // Para dibujar cómo se distribuyen las fotos usamos el borde INTERNO (0.5 cm entre fotos)
+  const currentLayouts = selectedCount
+    ? getLayoutsForCount(selectedCount, getInternalBorderWidth(selectedCount))
+    : [];
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">

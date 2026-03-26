@@ -3,7 +3,7 @@ import { ArrowLeft, Trash2, Copy, RotateCw, Type, Smile, ArrowUp, ArrowDown, Cro
         import { Stage, Layer, Image as KonvaImage, Rect, Transformer, Group, Text as KonvaText, Line } from 'react-konva';
 import Konva from 'konva';
 import { usePageCache } from '../hooks/usePageCache';
-import { getLayoutById } from '../utils/photoLayouts';
+import { getLayoutById, getInternalBorderWidth } from '../utils/photoLayouts';
 import { detectBrowserCapabilities, showBraveCompatibilityWarning, setupBraveFallbacks } from '../utils/browserCompatibility';
 import { ImageCropModal } from './ImageCropModal';
 import type { CropInfo } from './ImageCropModal';
@@ -177,6 +177,8 @@ const PhotoImage: React.FC<{
   useEffect(() => {
     if (isSelected && transformerRef.current && imageRef.current) {
       transformerRef.current.nodes([imageRef.current]);
+      // Asegurar que el Transformer (nodos) quede SIEMPRE por encima de bordes y otras formas
+      transformerRef.current.moveToTop();
       transformerRef.current.getLayer()?.batchDraw();
     }
   }, [isSelected]);
@@ -1453,12 +1455,16 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   // TAMAÑO FIJO DEL ÁREA INTERNA (coincide con photoLayouts.ts)
   const PAGE_WIDTH = 831;
   const PAGE_HEIGHT = 1141;
-  const MULTI_LAYOUT_BORDER_SIZE = 56.7; // 1.5cm (37.8px por cm)
+  const MULTI_LAYOUT_BORDER_SIZE = 56.7; // 1.5cm (37.8px por cm) - BORDE EXTERIOR
 
   // BORDER_SIZE: Marco que va alrededor del área interna fija.
-  // Para múltiples compartimentos, usar valor más delgado para líneas finas.
+  // Para múltiples compartimentos, se mantiene en 1.5 cm (marco exterior).
   // Para página individual, usar valor personalizable del usuario.
   const BORDER_SIZE = noBorders ? 0 : (photoCount > 1 ? MULTI_LAYOUT_BORDER_SIZE : customBorderSize);
+
+  // Grosor del BORDE INTERNO (líneas que separan las fotos dentro del layout).
+  // Para páginas con múltiples fotos, debe ser 0.5 cm.
+  const INTERNAL_BORDER_SIZE = photoCount > 1 ? getInternalBorderWidth(photoCount) : BORDER_SIZE;
 
   // El canvas total se deriva del área interna + marco para mantener centrado el layout.
   const TOTAL_CANVAS_WIDTH = PAGE_WIDTH + (BORDER_SIZE * 2);
@@ -1467,7 +1473,8 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   // Obtener el layout seleccionado con el BORDER_SIZE actual
   const selectedLayout = useMemo(() => {
     if (photoCount > 0 && layoutId) {
-      const layout = getLayoutById(layoutId, photoCount, BORDER_SIZE);
+      // Usar borde INTERNO de 0.5 cm para separar las fotos dentro del layout
+      const layout = getLayoutById(layoutId, photoCount, INTERNAL_BORDER_SIZE);
       console.log('🔄 Layout recalculado:', {
         photoCount,
         layoutId,
@@ -1933,9 +1940,9 @@ export const PageEditor: React.FC<PageEditorProps> = ({
       return;
     }
 
-    // Si hay photoCount y layoutId definidos, obtener el layout
+    // Si hay photoCount y layoutId definidos, obtener el layout usando el BORDE INTERNO actual
     const hasPhotoCount = photoCount > 0 && layoutId;
-    const layout = hasPhotoCount ? getLayoutById(layoutId, photoCount, BORDER_SIZE) : null;
+    const layout = hasPhotoCount ? getLayoutById(layoutId, photoCount, INTERNAL_BORDER_SIZE) : null;
     const gridPositions = layout ? layout.positions : [];
 
     const filesToLoad = Array.from(files).slice(0, remainingSlots);
@@ -1967,7 +1974,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
             const defaultSize = Math.min(PAGE_WIDTH / 3, PAGE_HEIGHT / 3);
             posX = (PAGE_WIDTH - defaultSize) / 2;
             posY = (PAGE_HEIGHT - defaultSize) / 2;
-            width = defaultSize;9
+            width = defaultSize;
             height = defaultSize;
           }
 
@@ -3200,7 +3207,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                 fill={borderColor}
               />
 
-              {/* FOTOS encima del fondo azul - CLIPEADAS */}
+              {/* FOTOS encima del fondo azul - CLIPEADAS (pero por DEBAJO de los bordes internos) */}
               <Group
                 x={BORDER_SIZE}
                 y={BORDER_SIZE}
@@ -3239,7 +3246,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                   ))}
               </Group>
 
-              {/* LÍNEAS DORADAS que dividen según layout */}
+              {/* LÍNEAS DORADAS que dividen según layout (por ENCIMA de las fotos) */}
               {!noBorders && effectiveLayoutPositions.length > 1 && (() => {
                 // Generar líneas divisorias robustas y evitar micro-gaps por subpixel.
                 const lines: Array<{type: 'v' | 'h', x: number, y: number, width: number, height: number}> = [];
@@ -3310,7 +3317,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                       type: 'v',
                       x,
                       y: 0,
-                      width: BORDER_SIZE,
+                      width: INTERNAL_BORDER_SIZE,
                       height: PAGE_HEIGHT,
                     });
                   });
@@ -3321,7 +3328,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                       x: 0,
                       y,
                       width: PAGE_WIDTH,
-                      height: BORDER_SIZE,
+                      height: INTERNAL_BORDER_SIZE,
                     });
                   });
                 } else {
@@ -3344,7 +3351,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                         type: 'v',
                         x,
                         y: minY,
-                        width: BORDER_SIZE,
+                        width: INTERNAL_BORDER_SIZE,
                         height: maxY - minY,
                       });
                     }
@@ -3369,7 +3376,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                         x: minX,
                         y,
                         width: maxX - minX,
-                        height: BORDER_SIZE,
+                        height: INTERNAL_BORDER_SIZE,
                       });
                     }
                   });

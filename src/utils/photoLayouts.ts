@@ -7,13 +7,27 @@ export interface LayoutOption {
 const PAGE_WIDTH = 831;
 const PAGE_HEIGHT = 1141;
 const PIXELS_PER_CM = 37.8;
+
+// Borde exterior (marco) para páginas con múltiples fotos: 1.5 cm
 const MULTI_LAYOUT_BORDER_CM = 1.5;
 const MULTI_LAYOUT_BORDER_PX = PIXELS_PER_CM * MULTI_LAYOUT_BORDER_CM;
 
-// Calcular el grosor del borde basado en la cantidad de fotos
+// Borde interno (separación ENTRE fotos) para layouts con múltiples fotos: 0.5 cm
+const INTERNAL_MULTI_LAYOUT_BORDER_CM = 0.5;
+const INTERNAL_MULTI_LAYOUT_BORDER_PX = PIXELS_PER_CM * INTERNAL_MULTI_LAYOUT_BORDER_CM;
+
+// Calcular el grosor del borde EXTERIOR basado en la cantidad de fotos
 const getBorderWidth = (count: number): number => {
   if (count >= 2 && count <= 42) {
-    return MULTI_LAYOUT_BORDER_PX; // 1.5cm para layouts de 2 a 42 fotos
+    return MULTI_LAYOUT_BORDER_PX; // 1.5cm para layouts de 2 a 42 fotos (marco exterior)
+  }
+  return PIXELS_PER_CM; // ~1cm para página individual
+};
+
+// Calcular el grosor del borde INTERNO (líneas que separan las fotos)
+const getInternalBorderWidth = (count: number): number => {
+  if (count >= 2 && count <= 42) {
+    return INTERNAL_MULTI_LAYOUT_BORDER_PX; // 0.5cm entre fotos para layouts de 2 a 42
   }
   return PIXELS_PER_CM; // ~1cm para página individual
 };
@@ -338,5 +352,5 @@ export const getLayoutById = (layoutId: string, count: number, borderWidth?: num
   return layouts.find(l => l.id === layoutId) || layouts[0] || null;
 };
 
-// Exportar la función para obtener el ancho del borde
-export { getBorderWidth };
+// Exportar funciones para obtener el ancho de los bordes
+export { getBorderWidth, getInternalBorderWidth };
