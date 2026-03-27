@@ -102,7 +102,8 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
   const JPEG_MIN_QUALITY = 0.35;
   const JPEG_MAX_QUALITY = 1;
   const JPEG_QUALITY_SEARCH_STEPS = 8;
-  const EXPORT_DPI_CANDIDATES = [96];
+  // Exportación a 300 dpi para impresión
+  const EXPORT_DPI_CANDIDATES = [300];
   const SHEET_PAGE_PAIRS: Array<[number, number]> = [
     [6, 1],
     [2, 3],
