@@ -11,6 +11,7 @@ interface UserData {
   cedula: string;
   celular: string;
   email: string;
+  nombre?: string;
   otpVerified: boolean;
 }
 
@@ -56,6 +57,7 @@ function App() {
           cedula: '0000000000',
           celular: '0000000000',
           email: 'demo@example.com',
+          nombre: 'Estudiante Demo',
           otpVerified: true,
         };
 
@@ -219,6 +221,7 @@ function App() {
           initialPhotos={editedPages.get(selectedPageId)?.photos || []}
           initialPhotoCount={selectedPhotoCount}
           layoutId={selectedLayoutId}
+          studentName={userData.nombre?.trim() || userData.email.split('@')[0]}
         />
       )}
     </BraveBlocker>

@@ -102,8 +102,11 @@ export const PageSelector: React.FC<PageSelectorProps> = ({ onSelectPage, edited
   const JPEG_MIN_QUALITY = 0.35;
   const JPEG_MAX_QUALITY = 1;
   const JPEG_QUALITY_SEARCH_STEPS = 8;
-  // Exportación a 300 dpi para impresión
-  const EXPORT_DPI_CANDIDATES = [300];
+  // Exportación: intentar máxima nitidez manteniendo tamaño físico y peso razonable.
+  // Primero se prueba con 450 dpi; si el ZIP se pasa del objetivo, el algoritmo
+  // ajusta solo la calidad JPEG sin tocar resolución, y si aun así es demasiado,
+  // cae de vuelta a 300 dpi conservando el tamaño (45x30 cm).
+  const EXPORT_DPI_CANDIDATES = [450, 300];
   const SHEET_PAGE_PAIRS: Array<[number, number]> = [
     [6, 1],
     [2, 3],

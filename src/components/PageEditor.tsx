@@ -19,6 +19,7 @@ interface PageEditorProps {
   initialPhotos: Photo[];
   initialPhotoCount?: number;
   layoutId?: string;
+  studentName?: string;
 }
 
 interface Photo {
@@ -588,6 +589,72 @@ const SelectedPhotoOverflowHint: React.FC<{
         perfectDrawEnabled={false}
       />
     </>
+  );
+};
+
+// Hint visual para mostrar la parte de la foto que queda "debajo" del marco
+// de nombre del estudiante en la contraportada (página 6).
+const StudentFrameOverlapHint: React.FC<{
+  photo: Photo;
+  frameRect: { x: number; y: number; width: number; height: number };
+  borderSize: number;
+  isSelected: boolean;
+  opacity?: number;
+}> = ({ photo, frameRect, borderSize, isSelected, opacity = 0.35 }) => {
+  const [image] = useImageLoader(photo.src);
+
+  if (!image) return null;
+
+  const absoluteX = photo.x + borderSize;
+  const absoluteY = photo.y + borderSize;
+
+  const photoRight = absoluteX + photo.width;
+  const photoBottom = absoluteY + photo.height;
+  const frameRight = frameRect.x + frameRect.width;
+  const frameBottom = frameRect.y + frameRect.height;
+
+  // Si no hay intersección entre la foto y el marco, no mostrar hint
+  const hasIntersection =
+    absoluteX < frameRight &&
+    photoRight > frameRect.x &&
+    absoluteY < frameBottom &&
+    photoBottom > frameRect.y;
+
+  if (!hasIntersection) return null;
+
+  return (
+    <Group
+      listening={false}
+      clipX={frameRect.x}
+      clipY={frameRect.y}
+      clipWidth={frameRect.width}
+      clipHeight={frameRect.height}
+    >
+      <KonvaImage
+        image={image}
+        x={absoluteX}
+        y={absoluteY}
+        width={photo.width}
+        height={photo.height}
+        rotation={photo.rotation}
+        opacity={opacity}
+        listening={false}
+        perfectDrawEnabled={false}
+      />
+      {isSelected && (
+        <Rect
+          x={frameRect.x}
+          y={frameRect.y}
+          width={frameRect.width}
+          height={frameRect.height}
+          stroke="#39FF14"
+          strokeWidth={1}
+          dash={[4, 3]}
+          listening={false}
+          perfectDrawEnabled={false}
+        />
+      )}
+    </Group>
   );
 };
 
@@ -1357,6 +1424,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   initialPhotos,
   initialPhotoCount = 0,
   layoutId: initialLayoutId = '',
+  studentName,
 }) => {
   console.log('🎨 PageEditor: Props recibidos', { 
     pageId, 
@@ -1445,6 +1513,9 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   const [originalPhotoState, setOriginalPhotoState] = useState<Photo | null>(null);
   const [isApplyingShape, setIsApplyingShape] = useState(false);
 
+  // Ocultar hints visuales (overflow, marco) durante la exportación/preview
+  const [hideEditorHintsForExport, setHideEditorHintsForExport] = useState(false);
+
   // Requerimiento: no persistir cambios automáticamente.
   const AUTO_SAVE_ENABLED = false;
   
@@ -1469,6 +1540,29 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   // El canvas total se deriva del área interna + marco para mantener centrado el layout.
   const TOTAL_CANVAS_WIDTH = PAGE_WIDTH + (BORDER_SIZE * 2);
   const TOTAL_CANVAS_HEIGHT = PAGE_HEIGHT + (BORDER_SIZE * 2);
+
+  // Configuración del marco con nombre del estudiante (solo página 6 - contraportada)
+  const isBackCover = pageId === 6;
+  const STUDENT_FRAME_WIDTH = 260;
+  const STUDENT_FRAME_HEIGHT = 120;
+  const STUDENT_FRAME_MARGIN = 24;
+
+  const studentFrameRect = useMemo(() => {
+    if (!isBackCover) return null;
+
+    const innerX = PAGE_WIDTH - STUDENT_FRAME_WIDTH - STUDENT_FRAME_MARGIN;
+    const innerY = PAGE_HEIGHT - STUDENT_FRAME_HEIGHT - STUDENT_FRAME_MARGIN;
+
+    const absX = BORDER_SIZE + innerX;
+    const absY = BORDER_SIZE + innerY;
+
+    return {
+      x: absX,
+      y: absY,
+      width: STUDENT_FRAME_WIDTH,
+      height: STUDENT_FRAME_HEIGHT,
+    };
+  }, [isBackCover, PAGE_WIDTH, PAGE_HEIGHT, BORDER_SIZE]);
   
   // Obtener el layout seleccionado con el BORDER_SIZE actual
   const selectedLayout = useMemo(() => {
@@ -2601,6 +2695,11 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     
     // Esperar a que React actualice y quite el transformer
     await new Promise(resolve => setTimeout(resolve, 100));
+    // Ocultar hints visuales (overflow fuera del lienzo y marco de nombre) para la captura
+    setHideEditorHintsForExport(true);
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    let savedSuccessfully = false;
 
     try {
       const stage = stageRef.current;
@@ -2747,7 +2846,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
       setHasUnsavedChanges(false); // Marcar como guardado
       setIsSaving(false);
       setTimeout(() => setSaveMessage(null), 3000);
-      return true;
+      savedSuccessfully = true;
     } catch (error) {
       console.error('❌ Error al guardar preview:', error);
       // Quitar overlay si existe
@@ -2757,8 +2856,11 @@ export const PageEditor: React.FC<PageEditorProps> = ({
       setSaveMessage('❌ Error al guardar');
       setIsSaving(false);
       setTimeout(() => setSaveMessage(null), 3000);
-      return false;
+      savedSuccessfully = false;
     }
+    // Volver a mostrar los hints visuales en el editor
+    setHideEditorHintsForExport(false);
+    return savedSuccessfully;
   };
 
   // Mostrar modal de confirmación al intentar salir (solo si hay cambios sin guardar)
@@ -3162,7 +3264,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
             scaleY={zoom}
           >
             {/* Capa separada para hint de overflow fuera del lienzo (debajo del contenido principal) */}
-            {overflowPhotos.length > 0 && (
+            {!hideEditorHintsForExport && overflowPhotos.length > 0 && (
               <Layer>
                 {overflowPhotos.map((overflowPhoto) => (
                   <SelectedPhotoOverflowHint
@@ -3245,6 +3347,22 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                     />
                   ))}
               </Group>
+
+                {/* Hint visual para fotos que quedan debajo del marco de nombre (solo contraportada) */}
+                {isBackCover && studentFrameRect && !hideEditorHintsForExport && (
+                  <Group listening={false}>
+                    {photos.map((photo) => (
+                      <StudentFrameOverlapHint
+                        key={`frame-hint-${photo.id}`}
+                        photo={photo}
+                        frameRect={studentFrameRect}
+                        borderSize={BORDER_SIZE}
+                        isSelected={photo.id === selectedId}
+                        opacity={photo.id === selectedId ? 0.5 : 0.28}
+                      />
+                    ))}
+                  </Group>
+                )}
 
               {/* LÍNEAS DORADAS que dividen según layout (por ENCIMA de las fotos) */}
               {!noBorders && effectiveLayoutPositions.length > 1 && (() => {
@@ -3420,6 +3538,33 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                   <Rect x={0} y={0} width={BORDER_SIZE} height={TOTAL_CANVAS_HEIGHT} fill={backgroundColor} />
                   {/* Borde derecho */}
                   <Rect x={BORDER_SIZE + PAGE_WIDTH} y={0} width={BORDER_SIZE} height={TOTAL_CANVAS_HEIGHT} fill={backgroundColor} />
+                </Group>
+              )}
+
+              {/* Nombre del estudiante en la contraportada (página 6) - solo texto, sin contenedor */}
+              {isBackCover && studentFrameRect && (
+                <Group listening={false}>
+                  <KonvaText
+                    text={(studentName && studentName.trim()) ? studentName.trim() : 'Nombre del estudiante'}
+                    x={studentFrameRect.x}
+                    y={studentFrameRect.y}
+                    width={studentFrameRect.width}
+                    height={studentFrameRect.height}
+                    fontSize={22}
+                    fontFamily="Bebas Neue, system-ui, -apple-system, BlinkMacSystemFont, sans-serif"
+                    fill="#111827"
+                    stroke="#F9FAFB"
+                    strokeWidth={0.7}
+                    shadowColor="#000000"
+                    shadowBlur={4}
+                    shadowOffsetX={2}
+                    shadowOffsetY={2}
+                    shadowOpacity={0.65}
+                    letterSpacing={2.5}
+                    align="right"
+                    verticalAlign="bottom"
+                    listening={false}
+                  />
                 </Group>
               )}
 
