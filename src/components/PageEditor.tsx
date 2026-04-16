@@ -1527,19 +1527,24 @@ export const PageEditor: React.FC<PageEditorProps> = ({
   const PAGE_WIDTH = 831;
   const PAGE_HEIGHT = 1141;
   const MULTI_LAYOUT_BORDER_SIZE = 56.7; // 1.5cm (37.8px por cm) - BORDE EXTERIOR
+  const SINGLE_PAGE_CONTENT_OFFSET = 20; // Mantener el lienzo estable en página individual
 
   // BORDER_SIZE: Marco que va alrededor del área interna fija.
   // Para múltiples compartimentos, se mantiene en 1.5 cm (marco exterior).
   // Para página individual, usar valor personalizable del usuario.
   const BORDER_SIZE = noBorders ? 0 : (photoCount > 1 ? MULTI_LAYOUT_BORDER_SIZE : customBorderSize);
 
+  // CONTENT_OFFSET_SIZE: desplazamiento fijo del contenido para no alterar el tamaño del lienzo.
+  // En página individual permanece estable; el borde crece hacia adentro sobre ese espacio.
+  const CONTENT_OFFSET_SIZE = noBorders ? 0 : (photoCount > 1 ? MULTI_LAYOUT_BORDER_SIZE : SINGLE_PAGE_CONTENT_OFFSET);
+
   // Grosor del BORDE INTERNO (líneas que separan las fotos dentro del layout).
   // Para páginas con múltiples fotos, debe ser 0.5 cm.
   const INTERNAL_BORDER_SIZE = photoCount > 1 ? getInternalBorderWidth(photoCount) : BORDER_SIZE;
 
   // El canvas total se deriva del área interna + marco para mantener centrado el layout.
-  const TOTAL_CANVAS_WIDTH = PAGE_WIDTH + (BORDER_SIZE * 2);
-  const TOTAL_CANVAS_HEIGHT = PAGE_HEIGHT + (BORDER_SIZE * 2);
+  const TOTAL_CANVAS_WIDTH = PAGE_WIDTH + (CONTENT_OFFSET_SIZE * 2);
+  const TOTAL_CANVAS_HEIGHT = PAGE_HEIGHT + (CONTENT_OFFSET_SIZE * 2);
 
   // Configuración del marco con nombre del estudiante (solo página 6 - contraportada)
   const isBackCover = pageId === 6;
@@ -1553,8 +1558,8 @@ export const PageEditor: React.FC<PageEditorProps> = ({
     const innerX = PAGE_WIDTH - STUDENT_FRAME_WIDTH - STUDENT_FRAME_MARGIN;
     const innerY = PAGE_HEIGHT - STUDENT_FRAME_HEIGHT - STUDENT_FRAME_MARGIN;
 
-    const absX = BORDER_SIZE + innerX;
-    const absY = BORDER_SIZE + innerY;
+    const absX = CONTENT_OFFSET_SIZE + innerX;
+    const absY = CONTENT_OFFSET_SIZE + innerY;
 
     return {
       x: absX,
@@ -1562,7 +1567,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
       width: STUDENT_FRAME_WIDTH,
       height: STUDENT_FRAME_HEIGHT,
     };
-  }, [isBackCover, PAGE_WIDTH, PAGE_HEIGHT, BORDER_SIZE]);
+  }, [isBackCover, PAGE_WIDTH, PAGE_HEIGHT, CONTENT_OFFSET_SIZE]);
   
   // Obtener el layout seleccionado con el BORDER_SIZE actual
   const selectedLayout = useMemo(() => {
@@ -1599,8 +1604,8 @@ export const PageEditor: React.FC<PageEditorProps> = ({
 
   const overflowPhotos = useMemo(() => {
     return photos.filter((photo) => {
-      const absoluteX = photo.x + BORDER_SIZE;
-      const absoluteY = photo.y + BORDER_SIZE;
+      const absoluteX = photo.x + CONTENT_OFFSET_SIZE;
+      const absoluteY = photo.y + CONTENT_OFFSET_SIZE;
 
       return (
         absoluteX < 0 ||
@@ -1609,7 +1614,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
         absoluteY + photo.height > TOTAL_CANVAS_HEIGHT
       );
     });
-  }, [photos, BORDER_SIZE, TOTAL_CANVAS_WIDTH, TOTAL_CANVAS_HEIGHT]);
+  }, [photos, CONTENT_OFFSET_SIZE, TOTAL_CANVAS_WIDTH, TOTAL_CANVAS_HEIGHT]);
 
   const overflowPhotoIdSet = useMemo(() => {
     return new Set(overflowPhotos.map((photo) => photo.id));
@@ -3311,8 +3316,8 @@ export const PageEditor: React.FC<PageEditorProps> = ({
 
               {/* FOTOS encima del fondo azul - CLIPEADAS (pero por DEBAJO de los bordes internos) */}
               <Group
-                x={BORDER_SIZE}
-                y={BORDER_SIZE}
+                x={CONTENT_OFFSET_SIZE}
+                y={CONTENT_OFFSET_SIZE}
                 clipX={0}
                 clipY={0}
                 clipWidth={PAGE_WIDTH}
@@ -3457,7 +3462,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
 
                     effectiveLayoutPositions.forEach(pos => {
                       const isLeftSide = Math.abs((pos.x + pos.width) - x) < EPS;
-                      const isRightSide = Math.abs(pos.x - (x + BORDER_SIZE)) < EPS;
+                      const isRightSide = Math.abs(pos.x - (x + CONTENT_OFFSET_SIZE)) < EPS;
                       if (isLeftSide || isRightSide) {
                         minY = Math.min(minY, pos.y);
                         maxY = Math.max(maxY, pos.y + pos.height);
@@ -3481,7 +3486,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
 
                     effectiveLayoutPositions.forEach(pos => {
                       const isTopSide = Math.abs((pos.y + pos.height) - y) < EPS;
-                      const isBottomSide = Math.abs(pos.y - (y + BORDER_SIZE)) < EPS;
+                      const isBottomSide = Math.abs(pos.y - (y + CONTENT_OFFSET_SIZE)) < EPS;
                       if (isTopSide || isBottomSide) {
                         minX = Math.min(minX, pos.x);
                         maxX = Math.max(maxX, pos.x + pos.width);
@@ -3510,7 +3515,7 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                 const seamlessLines = lines.map(extendLineIntoFrame);
                 
                 return (
-                  <Group x={BORDER_SIZE} y={BORDER_SIZE} listening={false}>
+                  <Group x={CONTENT_OFFSET_SIZE} y={CONTENT_OFFSET_SIZE} listening={false}>
                     {seamlessLines.map((line, idx) => (
                       <Rect
                         key={`divider-${line.type}-${idx}-${BORDER_SIZE}`}
@@ -3533,11 +3538,11 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                   {/* Borde superior */}
                   <Rect x={0} y={0} width={TOTAL_CANVAS_WIDTH} height={BORDER_SIZE} fill={backgroundColor} />
                   {/* Borde inferior */}
-                  <Rect x={0} y={BORDER_SIZE + PAGE_HEIGHT} width={TOTAL_CANVAS_WIDTH} height={BORDER_SIZE} fill={backgroundColor} />
+                  <Rect x={0} y={TOTAL_CANVAS_HEIGHT - BORDER_SIZE} width={TOTAL_CANVAS_WIDTH} height={BORDER_SIZE} fill={backgroundColor} />
                   {/* Borde izquierdo */}
                   <Rect x={0} y={0} width={BORDER_SIZE} height={TOTAL_CANVAS_HEIGHT} fill={backgroundColor} />
                   {/* Borde derecho */}
-                  <Rect x={BORDER_SIZE + PAGE_WIDTH} y={0} width={BORDER_SIZE} height={TOTAL_CANVAS_HEIGHT} fill={backgroundColor} />
+                  <Rect x={TOTAL_CANVAS_WIDTH - BORDER_SIZE} y={0} width={BORDER_SIZE} height={TOTAL_CANVAS_HEIGHT} fill={backgroundColor} />
                 </Group>
               )}
 
@@ -3632,8 +3637,8 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                 photo.id === selectedId && !overflowPhotoIdSet.has(photo.id) ? (
                   <Transformer
                     key={`photo-transformer-${photo.id}`}
-                    x={photo.x + BORDER_SIZE}
-                    y={photo.y + BORDER_SIZE}
+                    x={photo.x + CONTENT_OFFSET_SIZE}
+                    y={photo.y + CONTENT_OFFSET_SIZE}
                     width={photo.width}
                     height={photo.height}
                     rotation={photo.rotation}
@@ -3660,8 +3665,8 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                       node.scaleY(1);
 
                       const newAttrs = {
-                        x: node.x() - BORDER_SIZE,
-                        y: node.y() - BORDER_SIZE,
+                        x: node.x() - CONTENT_OFFSET_SIZE,
+                        y: node.y() - CONTENT_OFFSET_SIZE,
                         width: Math.max(5, photo.width * scaleX),
                         height: Math.max(5, photo.height * scaleY),
                         rotation: node.rotation(),
@@ -3684,8 +3689,8 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                       node.scaleY(1);
 
                       const newAttrs = {
-                        x: node.x() - BORDER_SIZE,
-                        y: node.y() - BORDER_SIZE,
+                        x: node.x() - CONTENT_OFFSET_SIZE,
+                        y: node.y() - CONTENT_OFFSET_SIZE,
                         width: Math.max(5, photo.width * scaleX),
                         height: Math.max(5, photo.height * scaleY),
                         rotation: node.rotation(),
@@ -3701,8 +3706,8 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                     }}
                     onDragMove={(e) => {
                       const newAttrs = {
-                        x: e.target.x() - BORDER_SIZE,
-                        y: e.target.y() - BORDER_SIZE,
+                        x: e.target.x() - CONTENT_OFFSET_SIZE,
+                        y: e.target.y() - CONTENT_OFFSET_SIZE,
                       };
 
                       setPhotos((prev) =>
@@ -3714,8 +3719,8 @@ export const PageEditor: React.FC<PageEditorProps> = ({
                     }}
                     onDragEnd={(e) => {
                       const newAttrs = {
-                        x: e.target.x() - BORDER_SIZE,
-                        y: e.target.y() - BORDER_SIZE,
+                        x: e.target.x() - CONTENT_OFFSET_SIZE,
+                        y: e.target.y() - CONTENT_OFFSET_SIZE,
                       };
 
                       setPhotos((prev) =>
